@@ -1,0 +1,81 @@
+import { db } from '../db/storage';
+import { User } from '../types';
+import { generateUUID } from '../utils/crypto';
+
+export class BackupService {
+  /**
+   * Export full database as a JSON download file.
+   * Restricted to Admin.
+   */
+  public static exportBackup(currentUser: User): { success: boolean; data?: string; filename?: string; error?: string } {
+    if (currentUser.role !== 'ADMIN') {
+      return { success: false, error: 'Permission Denied: Database backups are restricted to Administrators.' };
+    }
+
+    const payload = db.exportFullBackup();
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+    const filename = `omnibiz_pos_backup_${timestamp}.json`;
+
+    db.addAuditLog({
+      id: generateUUID(),
+      userId: currentUser.id,
+      userName: currentUser.name,
+      action: 'EXPORT_BACKUP',
+      details: `Generated full local database backup file (${filename})`,
+      entityType: 'BACKUP',
+      timestamp: new Date().toISOString(),
+    });
+
+    return { success: true, data: payload, filename };
+  }
+
+  public static exportBackupFile(currentUser: User): void {
+    const res = BackupService.exportBackup(currentUser);
+    if (!res.success || !res.data) return;
+
+    const blob = new Blob([res.data], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = res.filename || `omnibiz_backup_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  /**
+   * Restore database from uploaded JSON string.
+   * Restricted to Admin.
+   */
+  public static restoreBackup(
+    jsonString: string,
+    currentUser: User
+  ): { success: boolean; message: string } {
+    if (currentUser.role !== 'ADMIN') {
+      return { success: false, message: 'Permission Denied: Only Admin can restore database backups.' };
+    }
+
+    const result = db.importFullBackup(jsonString);
+
+    if (result.success) {
+      db.addAuditLog({
+        id: generateUUID(),
+        userId: currentUser.id,
+        userName: currentUser.name,
+        action: 'RESTORE_BACKUP',
+        details: `Restored database from external archive.`,
+        entityType: 'BACKUP',
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    return result;
+  }
+
+  public static restoreFromBackupFile(
+    jsonString: string,
+    currentUser: User
+  ): { success: boolean; error?: string } {
+    const res = BackupService.restoreBackup(jsonString, currentUser);
+    return { success: res.success, error: res.success ? undefined : res.message };
+  }
+}
