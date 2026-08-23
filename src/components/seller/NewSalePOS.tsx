@@ -73,16 +73,11 @@ export const NewSalePOS: React.FC = () => {
     return cart.reduce((sum, item) => sum + item.quantity * item.unitPrice - item.discount, 0);
   }, [cart]);
 
-  const taxAmount = useMemo(() => {
-    if (!settings.enableTax) return 0;
-    const discounted = Math.max(0, subtotal - overallDiscount);
-    return Number(((discounted * settings.taxRatePercent) / 100).toFixed(2));
-  }, [subtotal, overallDiscount, settings]);
-
+  // Tax removed per requirement
   const totalAmount = useMemo(() => {
     const discounted = Math.max(0, subtotal - overallDiscount);
-    return Number((discounted + taxAmount).toFixed(2));
-  }, [subtotal, overallDiscount, taxAmount]);
+    return Number(discounted.toFixed(2));
+  }, [subtotal, overallDiscount]);
 
   const tenderValue = parseFloat(amountReceived) || 0;
   const changeAmount = paymentMethod === 'CASH' ? Math.max(0, tenderValue - totalAmount) : 0;
@@ -127,6 +122,12 @@ export const NewSalePOS: React.FC = () => {
     });
   };
 
+  const updateUnitPrice = (productId: string, newPrice: number) => {
+    setCart(prev =>
+      prev.map(i => (i.product.id === productId ? { ...i, unitPrice: Math.max(0, newPrice) } : i))
+    );
+  };
+
   const updateQuantity = (productId: string, newQty: number) => {
     const item = cart.find(i => i.product.id === productId);
     if (!item) return;
@@ -142,6 +143,9 @@ export const NewSalePOS: React.FC = () => {
         title: 'Stock Exceeded',
         description: `Max stock for this item is ${item.product.currentStock}.`,
       });
+      setCart(prev =>
+        prev.map(i => (i.product.id === productId ? { ...i, quantity: item.product.currentStock } : i))
+      );
       return;
     }
 
@@ -423,49 +427,118 @@ export const NewSalePOS: React.FC = () => {
               </p>
             </div>
           ) : (
-            cart.map(item => (
-              <div
-                key={item.product.id}
-                className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 flex items-center justify-between gap-2"
-              >
-                <div className="flex-1 min-w-0">
-                  <h5 className="text-xs font-semibold text-white truncate">{item.product.name}</h5>
-                  <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5">
-                    <span>{formatCurrency(item.unitPrice, settings.currencySymbol)}</span>
-                    <span>•</span>
-                    <span className="font-semibold text-emerald-400 font-mono">
-                      Total: {formatCurrency(item.quantity * item.unitPrice - item.discount, settings.currencySymbol)}
-                    </span>
+            cart.map(item => {
+              const proposed = item.product.proposedSellingPrice || item.product.sellingPrice;
+              const cost = item.product.purchasePrice || 0;
+              const isBelowCost = item.unitPrice < cost && cost > 0;
+              const isBelowProposed = !isBelowCost && item.unitPrice < proposed && proposed > 0;
+              const itemProfit = (item.unitPrice - cost) * item.quantity - item.discount;
+
+              return (
+                <div
+                  key={item.product.id}
+                  className={`bg-slate-950 border rounded-lg p-2.5 space-y-2 transition ${
+                    isBelowCost
+                      ? 'border-rose-500/60 bg-rose-950/20'
+                      : isBelowProposed
+                      ? 'border-amber-500/50 bg-amber-950/10'
+                      : 'border-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h5 className="text-xs font-semibold text-white truncate">{item.product.name}</h5>
+                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 font-mono">
+                          {item.product.sku}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-1 flex-wrap">
+                        <span className="font-semibold text-emerald-400 font-mono">
+                          Total: {formatCurrency(item.quantity * item.unitPrice - item.discount, settings.currencySymbol)}
+                        </span>
+                        {cost > 0 && (
+                          <>
+                            <span>•</span>
+                            <span className={`text-[10px] font-medium font-mono ${itemProfit >= 0 ? 'text-slate-400' : 'text-rose-400 font-bold'}`}>
+                              Est Profit: {formatCurrency(itemProfit, settings.currencySymbol)}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => removeFromCart(item.product.id)}
+                      className="text-slate-500 hover:text-rose-400 p-1 shrink-0"
+                      title="Remove item"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Warning Alerts for Pricing */}
+                  {isBelowCost && (
+                    <div className="flex items-center gap-1 text-[10px] font-bold text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      <span>Warning: Selling below purchase cost ({formatCurrency(cost, settings.currencySymbol)})</span>
+                    </div>
+                  )}
+                  {isBelowProposed && (
+                    <div className="flex items-center gap-1 text-[10px] font-medium text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      <span>Below proposed price ({formatCurrency(proposed, settings.currencySymbol)})</span>
+                    </div>
+                  )}
+
+                  {/* Controls: Editable Price & Quantity Stepper */}
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-900">
+                    <div className="flex items-center gap-1.5">
+                      <label className="text-[10px] text-slate-400">Price:</label>
+                      <div className="relative">
+                        <span className="absolute left-1.5 top-1 text-[10px] text-slate-500">{settings.currencySymbol}</span>
+                        <input
+                          type="number"
+                          step="any"
+                          min="0"
+                          value={item.unitPrice}
+                          onChange={e => updateUnitPrice(item.product.id, parseFloat(e.target.value) || 0)}
+                          className="w-20 bg-slate-900 border border-slate-800 rounded pl-5 pr-1.5 py-0.5 text-xs text-white font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <label className="text-[10px] text-slate-400">Qty:</label>
+                      <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded p-0.5">
+                        <button
+                          type="button"
+                          onClick={() => updateQuantity(item.product.id, item.quantity - 1)}
+                          className="w-5 h-5 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                        <input
+                          type="number"
+                          min="1"
+                          max={item.product.currentStock}
+                          value={item.quantity}
+                          onChange={e => updateQuantity(item.product.id, parseInt(e.target.value, 10) || 0)}
+                          className="w-10 bg-slate-950 border border-slate-700 rounded text-center text-xs font-bold text-white font-mono py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => updateQuantity(item.product.id, item.quantity + 1)}
+                          className="w-5 h-5 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
-
-                {/* Quantity Stepper */}
-                <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-md p-0.5">
-                  <button
-                    onClick={() => updateQuantity(item.product.id, item.quantity - 1)}
-                    className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition"
-                  >
-                    <Minus className="w-3 h-3" />
-                  </button>
-                  <span className="w-7 text-center text-xs font-bold text-white font-mono">
-                    {item.quantity}
-                  </span>
-                  <button
-                    onClick={() => updateQuantity(item.product.id, item.quantity + 1)}
-                    className="w-6 h-6 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition"
-                  >
-                    <Plus className="w-3 h-3" />
-                  </button>
-                </div>
-
-                <button
-                  onClick={() => removeFromCart(item.product.id)}
-                  className="text-slate-500 hover:text-rose-400 p-1"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 
@@ -574,10 +647,10 @@ export const NewSalePOS: React.FC = () => {
               <span>Subtotal</span>
               <span className="font-mono">{formatCurrency(subtotal, settings.currencySymbol)}</span>
             </div>
-            {settings.enableTax && (
-              <div className="flex justify-between text-slate-400">
-                <span>Tax ({settings.taxRatePercent}%)</span>
-                <span className="font-mono">{formatCurrency(taxAmount, settings.currencySymbol)}</span>
+            {overallDiscount > 0 && (
+              <div className="flex justify-between text-amber-400">
+                <span>Discount</span>
+                <span className="font-mono">-{formatCurrency(overallDiscount, settings.currencySymbol)}</span>
               </div>
             )}
             <div className="flex justify-between text-base font-extrabold text-white pt-1.5 border-t border-slate-800">

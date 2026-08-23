@@ -38,9 +38,6 @@ export const ReceiptModal: React.FC = () => {
     if (activeReceipt.discount > 0) {
       text += `Discount:            -${formatCurrency(activeReceipt.discount, settings.currencySymbol)}\n`;
     }
-    if (activeReceipt.tax > 0) {
-      text += `Tax (${settings.taxRatePercent}%):          ${formatCurrency(activeReceipt.tax, settings.currencySymbol)}\n`;
-    }
     text += `TOTAL:                ${formatCurrency(activeReceipt.total, settings.currencySymbol)}\n`;
     text += `Payment:              ${activeReceipt.paymentMethod}\n`;
     text += `Tendered:             ${formatCurrency(activeReceipt.amountReceived, settings.currencySymbol)}\n`;
@@ -180,12 +177,6 @@ export const ReceiptModal: React.FC = () => {
                 <div className="flex justify-between text-emerald-700">
                   <span>Discount</span>
                   <span>-{formatCurrency(activeReceipt.discount, settings.currencySymbol)}</span>
-                </div>
-              )}
-              {activeReceipt.tax > 0 && (
-                <div className="flex justify-between text-slate-600">
-                  <span>Tax ({settings.taxRatePercent}%)</span>
-                  <span>{formatCurrency(activeReceipt.tax, settings.currencySymbol)}</span>
                 </div>
               )}
               <div className="flex justify-between text-sm font-extrabold text-slate-950 pt-1 border-t border-slate-200">

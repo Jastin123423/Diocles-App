@@ -25,8 +25,9 @@ export const SellerProducts: React.FC = () => {
   const [sku, setSku] = useState('');
   const [barcode, setBarcode] = useState('');
   const [categoryId, setCategoryId] = useState('');
+  const [purchasePrice, setPurchasePrice] = useState('');
   const [sellingPrice, setSellingPrice] = useState('');
-  const [currentStock, setCurrentStock] = useState('10');
+  const [currentStock, setCurrentStock] = useState('0');
   const [minStock, setMinStock] = useState('5');
   const [unit, setUnit] = useState('pcs');
   const [formError, setFormError] = useState('');
@@ -59,7 +60,12 @@ export const SellerProducts: React.FC = () => {
       return;
     }
 
+    const costPrice = parseFloat(purchasePrice) || 0;
+
     if (!currentUser) return;
+
+    const hardwareCat = categories.find(c => c.name.toLowerCase() === 'hardware' && c.status !== 'INACTIVE');
+    const firstActiveCat = categories.find(c => c.status !== 'INACTIVE');
 
     const result = ProductService.createProduct(
       {
@@ -67,7 +73,8 @@ export const SellerProducts: React.FC = () => {
         name,
         sku: sku.trim() || undefined,
         barcode: barcode.trim() || undefined,
-        categoryId: categoryId || categories[0]?.id || 'cat-supplies',
+        categoryId: categoryId || hardwareCat?.id || firstActiveCat?.id || categories[0]?.id || 'cat-hardware',
+        purchasePrice: costPrice,
         sellingPrice: price,
         currentStock: parseInt(currentStock, 10) || 0,
         minStock: parseInt(minStock, 10) || 5,
@@ -87,8 +94,9 @@ export const SellerProducts: React.FC = () => {
       setName('');
       setSku('');
       setBarcode('');
+      setPurchasePrice('');
       setSellingPrice('');
-      setCurrentStock('10');
+      setCurrentStock('0');
       setMinStock('5');
     } else {
       setFormError(result.error || 'Failed to create product.');
@@ -273,34 +281,38 @@ export const SellerProducts: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Category</label>
+                  <label className="block text-slate-300 font-medium mb-1">Category *</label>
                   <select
                     value={categoryId}
                     onChange={e => setCategoryId(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
-                    {categories.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
+                    {categories
+                      .filter(c => c.status !== 'INACTIVE')
+                      .map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
                   </select>
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Unit of Measure</label>
+                  <label className="block text-slate-300 font-medium mb-1">Unit of Measure *</label>
                   <select
                     value={unit}
                     onChange={e => setUnit(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
                     <option value="pcs">Pieces (pcs)</option>
+                    <option value="meter">Meter / Meters (m)</option>
                     <option value="pack">Pack</option>
                     <option value="box">Box</option>
                     <option value="kg">Kilogram (kg)</option>
                     <option value="pair">Pair</option>
                     <option value="roll">Roll</option>
                     <option value="liter">Liter</option>
+                    <option value="set">Set</option>
                   </select>
                 </div>
               </div>
@@ -329,9 +341,9 @@ export const SellerProducts: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Selling Price *</label>
+                  <label className="block text-slate-300 font-medium mb-1">Purchase Price</label>
                   <div className="relative">
                     <span className="absolute left-2.5 top-2 text-slate-500 font-mono">
                       {settings.currencySymbol}
@@ -339,6 +351,25 @@ export const SellerProducts: React.FC = () => {
                     <input
                       type="number"
                       step="0.01"
+                      min="0"
+                      value={purchasePrice}
+                      onChange={e => setPurchasePrice(e.target.value)}
+                      placeholder="0.00"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-6 pr-3 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Proposed Selling Price *</label>
+                  <div className="relative">
+                    <span className="absolute left-2.5 top-2 text-slate-500 font-mono">
+                      {settings.currencySymbol}
+                    </span>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
                       required
                       value={sellingPrice}
                       onChange={e => setSellingPrice(e.target.value)}
@@ -347,11 +378,14 @@ export const SellerProducts: React.FC = () => {
                     />
                   </div>
                 </div>
+              </div>
 
+              <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Initial Stock</label>
+                  <label className="block text-slate-300 font-medium mb-1">Initial Stock (Defaults to 0)</label>
                   <input
                     type="number"
+                    min="0"
                     value={currentStock}
                     onChange={e => setCurrentStock(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -362,6 +396,7 @@ export const SellerProducts: React.FC = () => {
                   <label className="block text-slate-300 font-medium mb-1">Min Threshold</label>
                   <input
                     type="number"
+                    min="0"
                     value={minStock}
                     onChange={e => setMinStock(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"

@@ -55,6 +55,8 @@ const MainLayout: React.FC = () => {
           return <NewSalePOS />;
         case 'products':
           return <SellerProducts />;
+        case 'purchases':
+          return <AdminPurchases />;
         case 'my_sales':
           return <SellerSales />;
         case 'receipts':
@@ -70,6 +72,8 @@ const MainLayout: React.FC = () => {
     switch (activeTab) {
       case 'dashboard':
         return <AdminDashboard />;
+      case 'new_sale':
+        return <NewSalePOS />;
       case 'shops':
         return <AdminShops />;
       case 'sales':

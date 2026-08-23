@@ -38,13 +38,21 @@ export class NotificationService {
 
       const due = debt.dueDate.slice(0, 10);
       const desc = debt.productDescription || 'bidhaa';
-      const amountStr = debt.amount.toLocaleString();
+      const remaining = debt.remainingAmount !== undefined ? debt.remainingAmount : debt.amount;
+      if (remaining <= 0) return;
+
+      const remainingStr = remaining.toLocaleString();
+      const isPartial = (debt.paidAmount || 0) > 0;
+      const amtDisplay = isPartial ? `salio la Sh ${remainingStr} (Jumla: Sh ${debt.amount.toLocaleString()})` : `Sh ${remainingStr}`;
+
+      // Find target shop name if debt is associated with a shop
+      const shopName = debt.shopId ? (shops.find(s => s.id === debt.shopId)?.name || 'Duka') : undefined;
 
       // Tomorrow upcoming payment
       if (due === tomorrowStr) {
         if (debt.type === 'WE_DEMAND') {
-          const contactMsg = debt.contact ? ` Mkumbushe ${debt.contact}.` : '';
-          const msg = `Kesho ni siku ya ${debt.debtorName} kulipa deni la ${desc} Sh ${amountStr}.${contactMsg}`;
+          const contactMsg = debt.contact ? ` Simu: ${debt.contact}.` : '';
+          const msg = `Kesho ni siku ya ${debt.debtorName} kulipa deni la ${desc} ${amtDisplay}.${contactMsg}`;
           const id = `notif-debt-up-cust-${debt.id}-${todayStr}`;
           
           if (!existingNotifications.some(n => n.id === id)) {
@@ -54,7 +62,11 @@ export class NotificationService {
               category: 'INFO',
               title: `Malipo ya Kesho: ${debt.debtorName}`,
               message: msg,
-              isGlobal: true,
+              isGlobal: false,
+              targetShopId: debt.shopId,
+              targetShopName: shopName,
+              targetUserIds: debt.createdByUserId ? [debt.createdByUserId] : undefined,
+              targetRole: 'ALL',
               relatedEntityId: debt.id,
               relatedEntityType: 'DEBT',
               createdAt: new Date().toISOString(),
@@ -63,7 +75,7 @@ export class NotificationService {
           }
         } else {
           // THEY_DEMAND (Wanatudai)
-          const msg = `Kesho ni siku ya kulipa ${debt.debtorName} pesa ya ${desc} Sh ${amountStr}.`;
+          const msg = `Kesho ni siku ya kulipa ${debt.debtorName} pesa ya ${desc} ${amtDisplay}.`;
           const id = `notif-debt-up-comp-${debt.id}-${todayStr}`;
           
           if (!existingNotifications.some(n => n.id === id)) {
@@ -73,7 +85,11 @@ export class NotificationService {
               category: 'WARNING',
               title: `Malipo Yetu Kesho: ${debt.debtorName}`,
               message: msg,
-              isGlobal: true,
+              isGlobal: false,
+              targetShopId: debt.shopId,
+              targetShopName: shopName,
+              targetUserIds: debt.createdByUserId ? [debt.createdByUserId] : undefined,
+              targetRole: 'ALL',
               relatedEntityId: debt.id,
               relatedEntityType: 'DEBT',
               createdAt: new Date().toISOString(),
@@ -88,7 +104,7 @@ export class NotificationService {
         const days = Math.max(1, DebtService.getOverdueDays(debt.dueDate, todayStr));
 
         if (debt.type === 'WE_DEMAND') {
-          const msg = `${debt.debtorName} kachelewa kulipa Sh ${amountStr} ya ${desc}. Zimepita siku ${days}.`;
+          const msg = `${debt.debtorName} kachelewa kulipa ${amtDisplay} ya ${desc}. Zimepita siku ${days}.`;
           const id = `notif-debt-over-cust-${debt.id}-${todayStr}`;
 
           if (!existingNotifications.some(n => n.id === id)) {
@@ -98,7 +114,11 @@ export class NotificationService {
               category: days > 7 ? 'CRITICAL' : 'WARNING',
               title: `Deni Limechelewa: ${debt.debtorName}`,
               message: msg,
-              isGlobal: true,
+              isGlobal: false,
+              targetShopId: debt.shopId,
+              targetShopName: shopName,
+              targetUserIds: debt.createdByUserId ? [debt.createdByUserId] : undefined,
+              targetRole: 'ALL',
               relatedEntityId: debt.id,
               relatedEntityType: 'DEBT',
               createdAt: new Date().toISOString(),
@@ -107,7 +127,7 @@ export class NotificationService {
           }
         } else {
           // THEY_DEMAND (Wanatudai)
-          const msg = `Malipo ya ${desc} kwa ${debt.debtorName} yamechelewa. Zimepita siku ${days}.`;
+          const msg = `Malipo ya ${desc} kwa ${debt.debtorName} (${amtDisplay}) yamechelewa. Zimepita siku ${days}.`;
           const id = `notif-debt-over-comp-${debt.id}-${todayStr}`;
 
           if (!existingNotifications.some(n => n.id === id)) {
@@ -117,7 +137,11 @@ export class NotificationService {
               category: 'CRITICAL',
               title: `Malipo Yamechelewa: ${debt.debtorName}`,
               message: msg,
-              isGlobal: true,
+              isGlobal: false,
+              targetShopId: debt.shopId,
+              targetShopName: shopName,
+              targetUserIds: debt.createdByUserId ? [debt.createdByUserId] : undefined,
+              targetRole: 'ALL',
               relatedEntityId: debt.id,
               relatedEntityType: 'DEBT',
               createdAt: new Date().toISOString(),
@@ -239,6 +263,38 @@ export class NotificationService {
   }
 
   /**
+   * Notify Admin and Sellers when a product is sold below purchase/cost price
+   */
+  public static notifyBelowCostSale(
+    product: Product,
+    soldPrice: number,
+    sellerUser: User,
+    shopName: string,
+    receiptNumber: string
+  ): void {
+    const now = new Date().toISOString();
+    const currency = db.getSettings().currencySymbol;
+    const lossPerUnit = product.purchasePrice - soldPrice;
+
+    const notif: AppNotification = {
+      id: `notif-loss-sale-${product.id}-${Date.now()}`,
+      type: 'STOCK_LOW_ADMIN',
+      category: 'WARNING',
+      title: `Onyo la Mauzo Chini ya Gharama: ${product.name}`,
+      message: `Bidhaa ya ${product.name} imeuzwa kwa ${currency} ${soldPrice.toLocaleString()} (Chini ya bei ya ununuzi ya ${currency} ${product.purchasePrice.toLocaleString()}, Hasara: ${currency} ${lossPerUnit.toLocaleString()}/unit). Muuzaji: ${sellerUser.name}, Risiti: #${receiptNumber} [${shopName}].`,
+      isGlobal: true,
+      targetShopId: product.shopId,
+      targetShopName: shopName,
+      relatedEntityId: product.id,
+      relatedEntityType: 'PRODUCT',
+      createdAt: now,
+      readByUserIds: [],
+    };
+
+    db.addNotification(notif);
+  }
+
+  /**
    * Get notifications visible to the currently logged in user based on role and shop assignments
    */
   public static getUserNotifications(user: User | null): AppNotification[] {
@@ -247,10 +303,10 @@ export class NotificationService {
     const all = db.getNotifications();
 
     return all.filter(n => {
-      // Global notifications (debt reminders) are seen by everyone
+      // Global broadcast notifications
       if (n.isGlobal) return true;
 
-      // Admin receives everything intended for Admin or ALL, across all shops
+      // Admin receives everything intended for Admin or ALL, across all shops, plus all debt notifications
       if (user.role === 'ADMIN') {
         if (n.targetRole === 'SELLER') return false; // Seller-only specific notices
         return true;
@@ -259,10 +315,27 @@ export class NotificationService {
       // Seller: must not receive ADMIN-only notices
       if (n.targetRole === 'ADMIN') return false;
 
+      // Specifically targeted by User IDs (e.g. debt registered by this specific user)
+      if (n.targetUserIds && n.targetUserIds.length > 0) {
+        if (n.targetUserIds.includes(user.id)) return true;
+        // If it's a debt and not created by this user, only show if assigned to target shop
+        if (n.relatedEntityType === 'DEBT') {
+          if (n.targetShopId && user.assignedShopIds?.includes(n.targetShopId)) {
+            return true;
+          }
+          return false;
+        }
+      }
+
       // Seller: if notification is shop-specific, check assignment
       if (n.targetShopId) {
         const assigned = user.assignedShopIds || [];
         return assigned.includes(n.targetShopId);
+      }
+
+      // If debt has no shop and no target user id match, seller should not see it
+      if (n.relatedEntityType === 'DEBT') {
+        return false;
       }
 
       return true;

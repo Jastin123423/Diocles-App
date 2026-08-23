@@ -140,13 +140,13 @@ export const INITIAL_USERS: User[] = [
 ];
 
 export const INITIAL_CATEGORIES: Category[] = [
-  { id: 'cat-tools', name: 'Power & Hand Tools', icon: 'Wrench', color: '#f59e0b' },
-  { id: 'cat-hardware', name: 'Hardware & Fasteners', icon: 'Hammer', color: '#64748b' },
-  { id: 'cat-stationery', name: 'Office & Stationery', icon: 'FileText', color: '#3b82f6' },
-  { id: 'cat-clothing', name: 'Clothing & Uniforms', icon: 'Shirt', color: '#a855f7' },
-  { id: 'cat-safety', name: 'Safety & Workwear', icon: 'Shield', color: '#10b981' },
-  { id: 'cat-electrical', name: 'Electrical & Lighting', icon: 'Zap', color: '#eab308' },
-  { id: 'cat-supplies', name: 'Commercial Supplies', icon: 'Package', color: '#8b5cf6' },
+  { id: 'cat-hardware', name: 'Hardware', icon: 'Hammer', color: '#64748b', status: 'ACTIVE' },
+  { id: 'cat-tools', name: 'Power & Hand Tools', icon: 'Wrench', color: '#f59e0b', status: 'ACTIVE' },
+  { id: 'cat-stationery', name: 'Office & Stationery', icon: 'FileText', color: '#3b82f6', status: 'ACTIVE' },
+  { id: 'cat-clothing', name: 'Clothing & Uniforms', icon: 'Shirt', color: '#a855f7', status: 'ACTIVE' },
+  { id: 'cat-safety', name: 'Safety & Workwear', icon: 'Shield', color: '#10b981', status: 'ACTIVE' },
+  { id: 'cat-electrical', name: 'Electrical & Lighting', icon: 'Zap', color: '#eab308', status: 'ACTIVE' },
+  { id: 'cat-supplies', name: 'Commercial Supplies', icon: 'Package', color: '#8b5cf6', status: 'ACTIVE' },
 ];
 
 export const INITIAL_PRODUCTS: Product[] = [

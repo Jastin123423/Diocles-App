@@ -89,7 +89,7 @@ class LocalDatabase {
   public init(): DatabaseState {
     let shops = this.loadTable<Shop[]>('shops', INITIAL_SHOPS);
     let users = this.loadTable<User[]>('users', INITIAL_USERS);
-    const categories = this.loadTable<Category[]>('categories', INITIAL_CATEGORIES);
+    let categories = this.loadTable<Category[]>('categories', INITIAL_CATEGORIES);
     let products = this.loadTable<Product[]>('products', INITIAL_PRODUCTS);
     let sales = this.loadTable<Sale[]>('sales', INITIAL_SALES);
     let purchases = this.loadTable<Purchase[]>('purchases', INITIAL_PURCHASES);
@@ -99,6 +99,35 @@ class LocalDatabase {
     const auditLogs = this.loadTable<AuditLog[]>('audit_logs', INITIAL_AUDIT_LOGS);
     const syncQueue = this.loadTable<SyncQueueItem[]>('sync_queue', []);
     const importHistory = this.loadTable<ImportHistoryItem[]>('import_history', INITIAL_IMPORT_HISTORY);
+
+    // Ensure categories have status and Hardware category exists
+    let categoriesModified = false;
+    if (!categories || categories.length === 0) {
+      categories = INITIAL_CATEGORIES;
+      categoriesModified = true;
+    } else {
+      categories = categories.map(cat => {
+        if (!cat.status) {
+          categoriesModified = true;
+          return { ...cat, status: 'ACTIVE' as const };
+        }
+        return cat;
+      });
+      const hasHardware = categories.some(c => c.name.toLowerCase() === 'hardware' || c.id === 'cat-hardware');
+      if (!hasHardware) {
+        categories.unshift({
+          id: 'cat-hardware',
+          name: 'Hardware',
+          icon: 'Hammer',
+          color: '#64748b',
+          status: 'ACTIVE' as const,
+        });
+        categoriesModified = true;
+      }
+    }
+    if (categoriesModified) {
+      this.saveTable('categories', categories);
+    }
 
     // Ensure shops exist
     if (!shops || shops.length === 0) {

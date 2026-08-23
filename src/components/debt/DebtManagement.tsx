@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { useApp } from '../../context/AppContext';
 import { DebtService } from '../../services/debtService';
-import { DebtRecord, DebtType, DebtStatus } from '../../types';
+import { DebtRecord, DebtType, DebtStatus, DebtPayment } from '../../types';
 import { formatCurrency, formatDate, formatDateTime } from '../../utils/formatters';
 import {
   DollarSign,
@@ -22,7 +22,10 @@ import {
   X,
   Sparkles,
   Info,
-  Archive,
+  History,
+  Receipt,
+  CreditCard,
+  Check,
 } from 'lucide-react';
 
 export const DebtManagement: React.FC = () => {
@@ -40,9 +43,10 @@ export const DebtManagement: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [editingDebt, setEditingDebt] = useState<DebtRecord | null>(null);
   const [payingDebt, setPayingDebt] = useState<DebtRecord | null>(null);
+  const [viewingHistoryDebt, setViewingHistoryDebt] = useState<DebtRecord | null>(null);
   const [deletingDebt, setDeletingDebt] = useState<DebtRecord | null>(null);
 
-  // Form State
+  // Form State (Create / Edit)
   const [formType, setFormType] = useState<DebtType>('WE_DEMAND');
   const [formName, setFormName] = useState('');
   const [formProduct, setFormProduct] = useState('');
@@ -51,7 +55,9 @@ export const DebtManagement: React.FC = () => {
   const [formContact, setFormContact] = useState('');
   const [formNotes, setFormNotes] = useState('');
 
-  // Payment note form state
+  // Payment Form State (Partial or Full Payment)
+  const [paymentAmountInput, setPaymentAmountInput] = useState<string>('');
+  const [paymentMethod, setPaymentMethod] = useState<string>('CASH');
   const [paymentNote, setPaymentNote] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
 
@@ -124,7 +130,17 @@ export const DebtManagement: React.FC = () => {
     setIsCreateModalOpen(true);
   };
 
-  // Handle Form Submit
+  // Open Payment Modal
+  const openPaymentModal = (debt: DebtRecord) => {
+    setPayingDebt(debt);
+    const remaining = debt.remainingAmount !== undefined ? debt.remainingAmount : (debt.status === 'PAID' ? 0 : debt.amount);
+    setPaymentAmountInput(remaining > 0 ? remaining.toString() : debt.amount.toString());
+    setPaymentMethod('CASH');
+    setPaymentNote('');
+    setPaymentDate(new Date().toISOString().slice(0, 10));
+  };
+
+  // Handle Form Submit (Create / Edit)
   const handleSaveDebt = (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return;
@@ -141,19 +157,26 @@ export const DebtManagement: React.FC = () => {
     }
 
     if (editingDebt) {
-      // Update
+      const currentPaid = editingDebt.paidAmount || 0;
+      const newRemaining = Math.max(0, amt - currentPaid);
+      
       DebtService.updateDebt(editingDebt.id, {
         type: formType,
         debtorName: formName.trim(),
         productDescription: formProduct.trim() || undefined,
         amount: amt,
+        paidAmount: currentPaid,
+        remainingAmount: newRemaining,
         dueDate: formDueDate ? formDueDate : undefined,
         contact: formContact.trim() || undefined,
         notes: formNotes.trim() || undefined,
-        status: editingDebt.status === 'PAID' ? 'PAID' : DebtService.calculateStatus({
+        status: newRemaining <= 0 ? 'PAID' : (currentPaid > 0 ? 'PARTIALLY_PAID' : DebtService.calculateStatus({
           ...editingDebt,
+          amount: amt,
+          paidAmount: currentPaid,
+          remainingAmount: newRemaining,
           dueDate: formDueDate,
-        }),
+        })),
       });
 
       addToast({
@@ -179,7 +202,7 @@ export const DebtManagement: React.FC = () => {
       addToast({
         type: 'success',
         title: formType === 'WE_DEMAND' ? 'Deni la Mteja Limehifadhiwa' : 'Deni la Kampuni Limehifadhiwa',
-        description: `Rekodi ya ${formName} (TSh ${amt.toLocaleString()}) imehifadhiwa.`,
+        description: `Rekodi ya ${formName} (${formatCurrency(amt, settings.currencySymbol)}) imehifadhiwa.`,
       });
     }
 
@@ -187,20 +210,60 @@ export const DebtManagement: React.FC = () => {
     setEditingDebt(null);
   };
 
-  // Handle Mark as Paid
-  const handleConfirmPayment = () => {
+  // Handle Recording Partial / Full Payment
+  const handleConfirmPayment = (e: React.FormEvent) => {
+    e.preventDefault();
     if (!payingDebt || !currentUser) return;
 
-    DebtService.markAsPaid(payingDebt.id, currentUser, paymentNote, new Date().toISOString());
+    const paymentAmt = parseFloat(paymentAmountInput);
+    if (isNaN(paymentAmt) || paymentAmt <= 0) {
+      addToast({
+        type: 'error',
+        title: 'Kiasi Batili',
+        description: 'Tafadhali weka kiasi halali cha malipo.',
+      });
+      return;
+    }
 
-    addToast({
-      type: 'success',
-      title: 'Malipo Yamekamilika / Marked as Paid',
-      description: `Deni la ${payingDebt.debtorName} (TSh ${payingDebt.amount.toLocaleString()}) limewekwa kama LIMELIPWA.`,
+    const currentRemaining = payingDebt.remainingAmount !== undefined ? payingDebt.remainingAmount : (payingDebt.amount - (payingDebt.paidAmount || 0));
+
+    if (paymentAmt > currentRemaining && currentRemaining > 0) {
+      addToast({
+        type: 'error',
+        title: 'Kiasi Kimezidi Salio',
+        description: `Kiasi ulichoweka (${formatCurrency(paymentAmt, settings.currencySymbol)}) kinazidi salio lililobaki (${formatCurrency(currentRemaining, settings.currencySymbol)}).`,
+      });
+      return;
+    }
+
+    const res = DebtService.recordPayment(payingDebt.id, paymentAmt, currentUser, {
+      paymentDate,
+      paymentMethod,
+      notes: paymentNote,
     });
 
-    setPayingDebt(null);
-    setPaymentNote('');
+    if (res.success && res.debt) {
+      const remainingAfter = res.debt.remainingAmount ?? 0;
+      const isComplete = remainingAfter <= 0;
+
+      addToast({
+        type: 'success',
+        title: isComplete ? 'Malipo Yamekamilika! 🎉' : 'Malipo ya Awamu Yamepokelewa',
+        description: isComplete
+          ? `Deni la ${payingDebt.debtorName} limelipwa kikamilifu (${formatCurrency(payingDebt.amount, settings.currencySymbol)}).`
+          : `Imelipwa ${formatCurrency(paymentAmt, settings.currencySymbol)}. Baki iliyobaki: ${formatCurrency(remainingAfter, settings.currencySymbol)}.`,
+      });
+
+      setPayingDebt(null);
+      setPaymentAmountInput('');
+      setPaymentNote('');
+    } else {
+      addToast({
+        type: 'error',
+        title: 'Hitilafu ya Malipo',
+        description: res.error || 'Imeshindikana kurekodi malipo.',
+      });
+    }
   };
 
   // Handle Delete
@@ -229,11 +292,11 @@ export const DebtManagement: React.FC = () => {
             </div>
             <div>
               <h1 className="text-base font-bold text-white flex items-center gap-2">
-                Usimamizi wa Madeni
-                <span className="text-xs font-normal text-slate-400">/ Debt Management</span>
+                Usimamizi wa Madeni (Debt Ledger)
+                <span className="text-xs font-normal text-slate-400">/ Partial & Full Settlements</span>
               </h1>
               <p className="text-xs text-slate-400">
-                Daftari huru la kurekodi wanaotudai (Tunadai) na tunaowadai (Wanatudai) pamoja na vikumbusho
+                Daftari huru la kurekodi wanaotudai (Tunadai) na tunaowadai (Wanatudai) pamoja na malipo ya awamu & vikumbusho
               </p>
             </div>
           </div>
@@ -259,7 +322,7 @@ export const DebtManagement: React.FC = () => {
 
       {/* Main Content Area */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {/* SUMMARY CARDS / DEBT DASHBOARD */}
+        {/* SUMMARY KPI CARDS */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           {/* 1. TUNADAI (WE DEMAND) */}
           <div className="bg-slate-900/80 border border-emerald-500/30 rounded-xl p-4 shadow-sm relative overflow-hidden">
@@ -267,7 +330,7 @@ export const DebtManagement: React.FC = () => {
               <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
                 <ArrowDownLeft className="w-4 h-4" />
                 <span>Tunadai / We Demand</span>
-                <span className="text-[11px] font-normal text-slate-400">(Watu/Wateja wanaotudai pesa)</span>
+                <span className="text-[11px] font-normal text-slate-400">(Wateja wanaotudai pesa)</span>
               </div>
               <span className="px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-mono font-bold">
                 {summary.weDemand.totalCount} Rekodi
@@ -276,16 +339,16 @@ export const DebtManagement: React.FC = () => {
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
               <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-2.5">
-                <div className="text-[10px] text-slate-400 font-medium uppercase">Kiasi Tunachodai</div>
+                <div className="text-[10px] text-slate-400 font-medium uppercase">Kiasi Kinachodaiwa</div>
                 <div className="text-sm sm:text-base font-bold font-mono text-emerald-400 mt-0.5">
                   {formatCurrency(summary.weDemand.totalOutstanding, settings.currencySymbol)}
                 </div>
-                <div className="text-[10px] text-slate-500 mt-0.5">Haijalipwa bado</div>
+                <div className="text-[10px] text-slate-500 mt-0.5">Salio lililobaki</div>
               </div>
 
               <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-2.5">
                 <div className="text-[10px] text-amber-400 font-medium uppercase flex items-center gap-1">
-                  <Clock className="w-3 h-3" /> Leo / Due Today
+                  <Clock className="w-3 h-3" /> Kulipwa Leo
                 </div>
                 <div className="text-sm sm:text-base font-bold font-mono text-amber-300 mt-0.5">
                   {formatCurrency(summary.weDemand.dueTodayAmount, settings.currencySymbol)}
@@ -421,10 +484,10 @@ export const DebtManagement: React.FC = () => {
               >
                 <option value="ALL">Hali Zote (All Statuses)</option>
                 <option value="PENDING">Inasubiri (Pending)</option>
+                <option value="PARTIALLY_PAID">Imelipwa Sehemu (Partially Paid)</option>
                 <option value="DUE_TODAY">Inatakiwa Leo (Due Today)</option>
                 <option value="OVERDUE">Imechelewa (Overdue)</option>
-                <option value="PAID">Imelipwa (Paid)</option>
-                <option value="CANCELLED">Imeghairiwa (Cancelled)</option>
+                <option value="PAID">Imelipwa Kamili (Fully Paid)</option>
               </select>
             </div>
           </div>
@@ -490,12 +553,13 @@ export const DebtManagement: React.FC = () => {
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-slate-800 bg-slate-950/80 text-slate-400 font-semibold uppercase text-[10px] tracking-wider">
-                  <th className="py-3 px-4">Aina / Type</th>
-                  <th className="py-3 px-4">Jina / Name</th>
-                  <th className="py-3 px-4">Bidhaa/Maelezo</th>
-                  <th className="py-3 px-4">Kiasi (Amount)</th>
+                  <th className="py-3 px-4">Aina</th>
+                  <th className="py-3 px-4">Mteja / Mtoa Huduma</th>
+                  <th className="py-3 px-4">Bidhaa / Maelezo</th>
+                  <th className="py-3 px-4">Jumla ya Deni</th>
+                  <th className="py-3 px-4">Kiasi Kilicholipwa</th>
+                  <th className="py-3 px-4">Salio Lililobaki (Remained)</th>
                   <th className="py-3 px-4">Tarehe ya Kulipa</th>
-                  <th className="py-3 px-4">Mawasiliano</th>
                   <th className="py-3 px-4">Hali (Status)</th>
                   <th className="py-3 px-4 text-right">Vitendo (Actions)</th>
                 </tr>
@@ -503,7 +567,7 @@ export const DebtManagement: React.FC = () => {
               <tbody className="divide-y divide-slate-800/60">
                 {filteredDebts.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="py-12 text-center text-slate-500">
+                    <td colSpan={9} className="py-12 text-center text-slate-500">
                       <FileText className="w-10 h-10 mx-auto mb-2 opacity-30" />
                       <div className="font-medium text-slate-400">Hakuna rekodi za madeni zilizopatikana</div>
                       <div className="text-[11px] text-slate-600 mt-0.5">
@@ -514,9 +578,13 @@ export const DebtManagement: React.FC = () => {
                 ) : (
                   filteredDebts.map(debt => {
                     const isPaid = debt.status === 'PAID';
+                    const isPartiallyPaid = debt.status === 'PARTIALLY_PAID';
                     const isOverdue = debt.status === 'OVERDUE';
                     const isDueToday = debt.status === 'DUE_TODAY';
                     const overdueDays = isOverdue ? DebtService.getOverdueDays(debt.dueDate) : 0;
+                    const paidAmount = debt.paidAmount || (isPaid ? debt.amount : 0);
+                    const remainingAmount = debt.remainingAmount !== undefined ? debt.remainingAmount : (isPaid ? 0 : Math.max(0, debt.amount - paidAmount));
+                    const paymentsCount = debt.payments?.length || (paidAmount > 0 ? 1 : 0);
 
                     return (
                       <tr
@@ -526,7 +594,7 @@ export const DebtManagement: React.FC = () => {
                         }`}
                       >
                         {/* Type */}
-                        <td className="py-3.5 px-4">
+                        <td className="py-3.5 px-4 whitespace-nowrap">
                           {debt.type === 'WE_DEMAND' ? (
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-semibold">
                               <ArrowDownLeft className="w-3 h-3" /> Tunadai
@@ -538,36 +606,64 @@ export const DebtManagement: React.FC = () => {
                           )}
                         </td>
 
-                        {/* Debtor Name */}
+                        {/* Debtor Name & Contact */}
                         <td className="py-3.5 px-4 font-semibold text-white">
                           <div className="flex items-center gap-1.5">
                             <span>{debt.debtorName}</span>
                           </div>
+                          {debt.contact && (
+                            <div className="flex items-center gap-1 font-mono text-[11px] text-slate-400 font-normal mt-0.5">
+                              <Phone className="w-3 h-3 text-slate-500" />
+                              <span>{debt.contact}</span>
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Product / Description */}
+                        <td className="py-3.5 px-4 text-slate-300">
+                          <div className="font-medium max-w-xs truncate">{debt.productDescription || '—'}</div>
                           {debt.notes && (
-                            <div className="text-[10px] text-slate-400 font-normal mt-0.5 max-w-xs truncate">
+                            <div className="text-[10px] text-slate-500 truncate max-w-xs">
                               {debt.notes}
                             </div>
                           )}
                         </td>
 
-                        {/* Product / Description (manually typed text) */}
-                        <td className="py-3.5 px-4 text-slate-300">
-                          <div className="font-medium">{debt.productDescription || '—'}</div>
+                        {/* Total Amount */}
+                        <td className="py-3.5 px-4 font-mono font-semibold text-slate-300 whitespace-nowrap">
+                          {formatCurrency(debt.amount, settings.currencySymbol)}
                         </td>
 
-                        {/* Amount */}
-                        <td className="py-3.5 px-4 font-mono font-bold text-sm">
-                          <span
-                            className={
-                              debt.type === 'WE_DEMAND' ? 'text-emerald-400' : 'text-amber-400'
-                            }
-                          >
-                            {formatCurrency(debt.amount, settings.currencySymbol)}
+                        {/* Paid Amount */}
+                        <td className="py-3.5 px-4 font-mono whitespace-nowrap">
+                          <span className={paidAmount > 0 ? 'text-emerald-400 font-bold' : 'text-slate-500'}>
+                            {formatCurrency(paidAmount, settings.currencySymbol)}
                           </span>
+                          {paymentsCount > 1 && (
+                            <button
+                              onClick={() => setViewingHistoryDebt(debt)}
+                              className="block text-[10px] text-blue-400 hover:underline mt-0.5 font-sans"
+                            >
+                              ({paymentsCount} awamu)
+                            </button>
+                          )}
+                        </td>
+
+                        {/* Remaining Amount */}
+                        <td className="py-3.5 px-4 font-mono font-bold text-sm whitespace-nowrap">
+                          {remainingAmount <= 0 ? (
+                            <span className="text-emerald-400 text-xs flex items-center gap-1">
+                              <Check className="w-3.5 h-3.5" /> 0 (Hakuna Deni)
+                            </span>
+                          ) : (
+                            <span className={debt.type === 'WE_DEMAND' ? 'text-emerald-300 font-extrabold' : 'text-amber-300 font-extrabold'}>
+                              {formatCurrency(remainingAmount, settings.currencySymbol)}
+                            </span>
+                          )}
                         </td>
 
                         {/* Due Date */}
-                        <td className="py-3.5 px-4">
+                        <td className="py-3.5 px-4 whitespace-nowrap">
                           {debt.dueDate ? (
                             <div>
                               <div className="font-mono text-slate-300">
@@ -589,37 +685,22 @@ export const DebtManagement: React.FC = () => {
                           )}
                         </td>
 
-                        {/* Contact */}
-                        <td className="py-3.5 px-4 text-slate-400">
-                          {debt.contact ? (
-                            <div className="flex items-center gap-1 font-mono text-slate-300">
-                              <Phone className="w-3 h-3 text-slate-500" />
-                              <span>{debt.contact}</span>
-                            </div>
-                          ) : (
-                            <span className="text-slate-600">—</span>
-                          )}
-                        </td>
-
                         {/* Status Badge */}
-                        <td className="py-3.5 px-4">
+                        <td className="py-3.5 px-4 whitespace-nowrap">
                           {isPaid ? (
-                            <div className="space-y-0.5">
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800 text-[10px] font-semibold">
-                                <CheckCircle2 className="w-3 h-3" /> Imelipwa
-                              </span>
-                              {debt.paidAt && (
-                                <div className="text-[9px] text-slate-400 font-mono">
-                                  {debt.paidAt.slice(0, 10)}
-                                </div>
-                              )}
-                            </div>
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-700/80 text-[10px] font-bold">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-400" /> Imelipwa Kamili
+                            </span>
+                          ) : isPartiallyPaid ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-950/80 text-blue-300 border border-blue-700/80 text-[10px] font-bold">
+                              <Clock className="w-3 h-3 text-blue-400" /> Imelipwa Sehemu
+                            </span>
                           ) : isOverdue ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-rose-950/80 text-rose-300 border border-rose-800 text-[10px] font-semibold">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-950/80 text-rose-300 border border-rose-800 text-[10px] font-semibold">
                               <AlertTriangle className="w-3 h-3" /> Imechelewa
                             </span>
                           ) : isDueToday ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800 text-[10px] font-semibold">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-800 text-[10px] font-semibold">
                               <Clock className="w-3 h-3" /> Inatakiwa Leo
                             </span>
                           ) : (
@@ -630,20 +711,30 @@ export const DebtManagement: React.FC = () => {
                         </td>
 
                         {/* Actions */}
-                        <td className="py-3.5 px-4 text-right">
+                        <td className="py-3.5 px-4 text-right whitespace-nowrap">
                           <div className="flex items-center justify-end gap-1.5">
                             {!isPaid && (
                               <button
-                                onClick={() => {
-                                  setPayingDebt(debt);
-                                  setPaymentNote('');
-                                  setPaymentDate(new Date().toISOString().slice(0, 10));
-                                }}
-                                className="px-2.5 py-1 rounded bg-emerald-600/90 hover:bg-emerald-500 text-white font-medium text-[11px] flex items-center gap-1 shadow-xs transition"
-                                title="Weka kama Imelipwa"
+                                onClick={() => openPaymentModal(debt)}
+                                className={`px-2.5 py-1.5 rounded text-white font-bold text-xs flex items-center gap-1 shadow-sm transition ${
+                                  debt.type === 'WE_DEMAND'
+                                    ? 'bg-emerald-600 hover:bg-emerald-500'
+                                    : 'bg-amber-600 hover:bg-amber-500'
+                                }`}
+                                title="Weka malipo ya deni hili"
                               >
-                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                <DollarSign className="w-3.5 h-3.5" />
                                 <span>Lipa</span>
+                              </button>
+                            )}
+
+                            {(debt.payments && debt.payments.length > 0) && (
+                              <button
+                                onClick={() => setViewingHistoryDebt(debt)}
+                                className="p-1.5 rounded hover:bg-slate-800 text-blue-400 hover:text-blue-300 transition"
+                                title="Angalia Historia ya Malipo (Payment History)"
+                              >
+                                <History className="w-4 h-4" />
                               </button>
                             )}
 
@@ -747,7 +838,7 @@ export const DebtManagement: React.FC = () => {
                 />
               </div>
 
-              {/* Product / Description (MANUALLY TYPED PLAIN TEXT) */}
+              {/* Product / Description */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-xs font-semibold text-slate-300">
@@ -762,29 +853,24 @@ export const DebtManagement: React.FC = () => {
                   onChange={e => setFormProduct(e.target.value)}
                   className="w-full bg-slate-950 text-xs text-white px-3 py-2 rounded-lg border border-slate-800 focus:outline-none focus:border-emerald-500"
                 />
-                <p className="text-[10px] text-slate-500 mt-1">
-                  * Hii ni maandishi huru ya kukumbusha — haiingiliani wala kubadilisha bidhaa au akiba (stock) za duka.
-                </p>
               </div>
 
               {/* Amount & Due Date */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Kiasi cha Pesa / Amount (TSh) <span className="text-rose-400">*</span>
+                    Jumla ya Deni / Total Amount (TSh) <span className="text-rose-400">*</span>
                   </label>
-                  <div className="relative">
-                    <input
-                      type="number"
-                      required
-                      min="1"
-                      step="any"
-                      placeholder="1000"
-                      value={formAmount}
-                      onChange={e => setFormAmount(e.target.value)}
-                      className="w-full bg-slate-950 text-xs font-mono font-bold text-emerald-400 px-3 py-2 rounded-lg border border-slate-800 focus:outline-none focus:border-emerald-500"
-                    />
-                  </div>
+                  <input
+                    type="number"
+                    required
+                    min="1"
+                    step="any"
+                    placeholder="10000"
+                    value={formAmount}
+                    onChange={e => setFormAmount(e.target.value)}
+                    className="w-full bg-slate-950 text-xs font-mono font-bold text-emerald-400 px-3 py-2 rounded-lg border border-slate-800 focus:outline-none focus:border-emerald-500"
+                  />
                 </div>
 
                 <div>
@@ -853,88 +939,335 @@ export const DebtManagement: React.FC = () => {
         </div>
       )}
 
-      {/* MARK AS PAID MODAL */}
-      {payingDebt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs">
-          <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      {/* PROFESSIONAL PARTIAL / FULL PAYMENT MODAL */}
+      {payingDebt && (() => {
+        const totalDebt = payingDebt.amount;
+        const currentPaid = payingDebt.paidAmount || (payingDebt.status === 'PAID' ? totalDebt : 0);
+        const currentRemaining = payingDebt.remainingAmount !== undefined ? payingDebt.remainingAmount : Math.max(0, totalDebt - currentPaid);
+        const typedPayAmt = parseFloat(paymentAmountInput) || 0;
+        const calculatedRemainder = Math.max(0, currentRemaining - typedPayAmt);
+        const isPayingFull = calculatedRemainder <= 0 && typedPayAmt >= currentRemaining;
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-xs overflow-y-auto">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-150 my-auto">
+              {/* Header */}
+              <div className={`p-4 border-b flex items-center justify-between ${
+                payingDebt.type === 'WE_DEMAND' 
+                  ? 'bg-emerald-950/60 border-emerald-800/60 text-emerald-300' 
+                  : 'bg-amber-950/60 border-amber-800/60 text-amber-300'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-black/40">
+                    <DollarSign className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-sm text-white">
+                      {payingDebt.type === 'WE_DEMAND'
+                        ? 'Pokea Malipo ya Deni (Kutoka kwa Mteja)'
+                        : 'Lipa Deni la Mtoa Huduma (Wanatudai)'}
+                    </h3>
+                    <p className="text-[11px] text-slate-300 font-normal">
+                      Unaweza kulipa kiasi chote au sehemu ya deni (Partial payment)
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setPayingDebt(null)}
+                  className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleConfirmPayment} className="p-5 space-y-4 text-xs">
+                {/* Debtor Details Card */}
+                <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-400">Jina la Mhusika:</span>
+                    <span className="font-bold text-white text-sm">{payingDebt.debtorName}</span>
+                  </div>
+                  {payingDebt.productDescription && (
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-400">Bidhaa/Maelezo:</span>
+                      <span className="text-slate-300">{payingDebt.productDescription}</span>
+                    </div>
+                  )}
+                  
+                  {/* Financial Balance Summary */}
+                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 text-center">
+                    <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                      <div className="text-[10px] text-slate-400 uppercase">Jumla ya Deni</div>
+                      <div className="font-mono font-bold text-white text-xs mt-0.5">
+                        {formatCurrency(totalDebt, settings.currencySymbol)}
+                      </div>
+                    </div>
+                    <div className="p-2 rounded bg-slate-900 border border-slate-800">
+                      <div className="text-[10px] text-slate-400 uppercase">Zilizo Lipwa</div>
+                      <div className="font-mono font-bold text-emerald-400 text-xs mt-0.5">
+                        {formatCurrency(currentPaid, settings.currencySymbol)}
+                      </div>
+                    </div>
+                    <div className="p-2 rounded bg-slate-900 border border-emerald-500/30">
+                      <div className="text-[10px] text-amber-400 uppercase font-semibold">Baki ya Sasa</div>
+                      <div className="font-mono font-extrabold text-amber-300 text-sm mt-0.5">
+                        {formatCurrency(currentRemaining, settings.currencySymbol)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Amount to Pay Input & Quick Preset Buttons */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-bold text-slate-200">
+                      Kiasi Kinacholipwa Sasa / Amount Paying (TSh) *
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setPaymentAmountInput(currentRemaining.toString())}
+                        className="px-2 py-0.5 rounded bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-[10px] font-bold border border-emerald-500/40"
+                      >
+                        Lipa Yote ({formatCurrency(currentRemaining, settings.currencySymbol)})
+                      </button>
+                      {currentRemaining > 100 && (
+                        <button
+                          type="button"
+                          onClick={() => setPaymentAmountInput(Math.floor(currentRemaining / 2).toString())}
+                          className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-semibold"
+                        >
+                          50%
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-2.5 font-mono font-bold text-emerald-400 text-sm">
+                      {settings.currencySymbol}
+                    </span>
+                    <input
+                      type="number"
+                      required
+                      min="1"
+                      max={currentRemaining}
+                      step="any"
+                      placeholder="Weka kiasi..."
+                      value={paymentAmountInput}
+                      onChange={e => setPaymentAmountInput(e.target.value)}
+                      className="w-full bg-slate-950 text-base font-mono font-extrabold text-white pl-10 pr-3 py-2 rounded-xl border-2 border-emerald-500/50 focus:outline-none focus:border-emerald-400 shadow-inner"
+                    />
+                  </div>
+                </div>
+
+                {/* Live Remainder Calculation Preview */}
+                <div className={`p-3 rounded-xl border flex items-center justify-between ${
+                  isPayingFull
+                    ? 'bg-emerald-950/40 border-emerald-600/40 text-emerald-300'
+                    : 'bg-blue-950/40 border-blue-600/40 text-blue-300'
+                }`}>
+                  <div>
+                    <span className="text-[11px] block text-slate-400">Salio Litakalobaki Baada ya Malipo:</span>
+                    <span className="font-mono text-base font-extrabold text-white">
+                      {formatCurrency(calculatedRemainder, settings.currencySymbol)}
+                    </span>
+                  </div>
+
+                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ${
+                    isPayingFull
+                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                      : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                  }`}>
+                    {isPayingFull ? '✓ Limelipwa Kamili' : '⏱ Bado Deni (Sehemu)'}
+                  </span>
+                </div>
+
+                {/* Payment Method & Date */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Njia ya Malipo (Method)
+                    </label>
+                    <select
+                      value={paymentMethod}
+                      onChange={e => setPaymentMethod(e.target.value)}
+                      className="w-full bg-slate-950 text-xs text-white px-3 py-2 rounded-lg border border-slate-800 focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="CASH">Taslimu (Cash)</option>
+                      <option value="MOBILE_MONEY">Simu (M-Pesa / Tigo / Airtel)</option>
+                      <option value="BANK">Benki (Bank Transfer)</option>
+                      <option value="OTHER">Nyingine (Other)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1">
+                      Tarehe ya Malipo (Date)
+                    </label>
+                    <input
+                      type="date"
+                      value={paymentDate}
+                      onChange={e => setPaymentDate(e.target.value)}
+                      className="w-full bg-slate-950 text-xs text-white px-3 py-2 rounded-lg border border-slate-800 focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Payment Note */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Maelezo ya Malipo (Hiari / Notes)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Mfano: Malipo ya awamu ya kwanza taslimu dukani..."
+                    value={paymentNote}
+                    onChange={e => setPaymentNote(e.target.value)}
+                    className="w-full bg-slate-950 text-xs text-white px-3 py-2 rounded-lg border border-slate-800 focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+
+                {/* Previous Installments list inside payment modal if any */}
+                {(payingDebt.payments && payingDebt.payments.length > 0) && (
+                  <div className="pt-2 border-t border-slate-800">
+                    <div className="text-[11px] font-semibold text-slate-400 mb-1.5 flex items-center gap-1">
+                      <History className="w-3.5 h-3.5 text-blue-400" />
+                      <span>Historia ya Awamu Zilizolipwa Kabla:</span>
+                    </div>
+                    <div className="space-y-1 max-h-24 overflow-y-auto pr-1">
+                      {payingDebt.payments.map((p, idx) => (
+                        <div
+                          key={p.id || idx}
+                          className="flex justify-between items-center p-1.5 rounded bg-slate-950 border border-slate-800 text-[10px]"
+                        >
+                          <div>
+                            <span className="font-mono text-slate-400">{p.paymentDate}</span>
+                            <span className="text-slate-500 ml-1">({p.paymentMethod})</span>
+                            {p.notes && <span className="text-slate-400 ml-1 italic">- {p.notes}</span>}
+                          </div>
+                          <span className="font-mono font-bold text-emerald-400">
+                            +{formatCurrency(p.amount, settings.currencySymbol)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Action Buttons */}
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setPayingDebt(null)}
+                    className="px-4 py-2 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                  >
+                    Ghairi
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-md transition flex items-center gap-2"
+                  >
+                    <CheckCircle2 className="w-4 h-4" />
+                    <span>Hifadhi Malipo ({formatCurrency(typedPayAmt || 0, settings.currencySymbol)})</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* PAYMENT HISTORY MODAL */}
+      {viewingHistoryDebt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-xs">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95">
             <div className="p-4 bg-slate-850 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2 text-emerald-400 font-bold text-sm">
-                <CheckCircle2 className="w-5 h-5" />
-                <span>Thibitisha Malipo / Mark as Paid</span>
+              <div className="flex items-center gap-2 text-blue-400 font-bold text-sm">
+                <History className="w-5 h-5" />
+                <span>Historia ya Malipo: {viewingHistoryDebt.debtorName}</span>
               </div>
               <button
-                onClick={() => setPayingDebt(null)}
-                className="text-slate-400 hover:text-white p-1 rounded"
+                onClick={() => setViewingHistoryDebt(null)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <div className="p-5 space-y-4">
-              <div className="bg-slate-950 p-3.5 rounded-lg border border-slate-800 space-y-2 text-xs">
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Jina:</span>
-                  <span className="font-bold text-white">{payingDebt.debtorName}</span>
+            <div className="p-5 space-y-4 text-xs">
+              {/* Summary Card */}
+              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 flex justify-between items-center">
+                <div>
+                  <div className="text-slate-400">Jumla ya Deni:</div>
+                  <div className="text-sm font-bold font-mono text-white">
+                    {formatCurrency(viewingHistoryDebt.amount, settings.currencySymbol)}
+                  </div>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Bidhaa/Maelezo:</span>
-                  <span className="text-slate-200">{payingDebt.productDescription || '—'}</span>
+                <div>
+                  <div className="text-slate-400">Zilizolipwa:</div>
+                  <div className="text-sm font-bold font-mono text-emerald-400">
+                    {formatCurrency(viewingHistoryDebt.paidAmount || 0, settings.currencySymbol)}
+                  </div>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-400">Kiasi:</span>
-                  <span className="font-mono font-bold text-emerald-400 text-sm">
-                    {formatCurrency(payingDebt.amount, settings.currencySymbol)}
-                  </span>
+                <div>
+                  <div className="text-slate-400">Baki Iliyobaki:</div>
+                  <div className="text-sm font-bold font-mono text-amber-400">
+                    {formatCurrency(
+                      viewingHistoryDebt.remainingAmount !== undefined 
+                        ? viewingHistoryDebt.remainingAmount 
+                        : (viewingHistoryDebt.status === 'PAID' ? 0 : viewingHistoryDebt.amount),
+                      settings.currencySymbol
+                    )}
+                  </div>
                 </div>
               </div>
 
+              {/* Installments Table */}
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Tarehe ya Malipo (Payment Date)
-                </label>
-                <input
-                  type="date"
-                  value={paymentDate}
-                  onChange={e => setPaymentDate(e.target.value)}
-                  className="w-full bg-slate-950 text-xs text-white px-3 py-2 rounded-lg border border-slate-800 focus:outline-none focus:border-emerald-500"
-                />
+                <h4 className="font-bold text-slate-300 mb-2">Orodha ya Awamu za Malipo</h4>
+                {(!viewingHistoryDebt.payments || viewingHistoryDebt.payments.length === 0) ? (
+                  <div className="p-6 text-center text-slate-500 bg-slate-950 rounded-lg border border-slate-800">
+                    Hakuna malipo yaliyorekodiwa bado.
+                  </div>
+                ) : (
+                  <div className="border border-slate-800 rounded-xl overflow-hidden">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-950 text-slate-400 border-b border-slate-800">
+                        <tr>
+                          <th className="p-2.5 font-semibold">Tarehe</th>
+                          <th className="p-2.5 font-semibold">Kiasi</th>
+                          <th className="p-2.5 font-semibold">Njia</th>
+                          <th className="p-2.5 font-semibold">Baki Baada</th>
+                          <th className="p-2.5 font-semibold">Mpokeaji</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800">
+                        {viewingHistoryDebt.payments.map((payment, idx) => (
+                          <tr key={payment.id || idx} className="hover:bg-slate-850/40">
+                            <td className="p-2.5 font-mono text-slate-300">{payment.paymentDate}</td>
+                            <td className="p-2.5 font-mono font-bold text-emerald-400">
+                              {formatCurrency(payment.amount, settings.currencySymbol)}
+                            </td>
+                            <td className="p-2.5 text-slate-400">{payment.paymentMethod}</td>
+                            <td className="p-2.5 font-mono text-slate-300">
+                              {payment.remainingAfter !== undefined ? formatCurrency(payment.remainingAfter, settings.currencySymbol) : '—'}
+                            </td>
+                            <td className="p-2.5 text-slate-400">{payment.paidByName || 'Cashier'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
-                  Maelezo ya Malipo / Payment Note (Hiari)
-                </label>
-                <input
-                  type="text"
-                  placeholder="Mfano: Amelipa taslimu dukani, M-Pesa..."
-                  value={paymentNote}
-                  onChange={e => setPaymentNote(e.target.value)}
-                  className="w-full bg-slate-950 text-xs text-white px-3 py-2 rounded-lg border border-slate-800 focus:outline-none focus:border-emerald-500"
-                />
-              </div>
-
-              <div className="bg-emerald-950/30 border border-emerald-500/20 p-3 rounded text-[11px] text-emerald-300/90 flex items-start gap-2">
-                <Info className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-                <span>
-                  Kuweka deni hili kama <strong>Limelipwa</strong> kutasimamisha vikumbusho vya deni lililochelewa. Rekodi na historia itabaki salama kwenye daftari.
-                </span>
-              </div>
-
-              <div className="flex items-center justify-end gap-2.5 pt-2">
+              <div className="flex justify-end pt-2">
                 <button
-                  type="button"
-                  onClick={() => setPayingDebt(null)}
-                  className="px-4 py-2 rounded-lg text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                  onClick={() => setViewingHistoryDebt(null)}
+                  className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white font-medium text-xs transition"
                 >
-                  Ghairi
-                </button>
-                <button
-                  type="button"
-                  onClick={handleConfirmPayment}
-                  className="px-5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold shadow-sm transition flex items-center gap-1.5"
-                >
-                  <CheckCircle2 className="w-4 h-4" />
-                  <span>Ndio, Weka Limelipwa</span>
+                  Funga
                 </button>
               </div>
             </div>
@@ -955,7 +1288,7 @@ export const DebtManagement: React.FC = () => {
               </div>
 
               <p className="text-xs text-slate-300 mb-4">
-                Una uhakika unataka kufuta rekodi hii ya deni la TSh {deletingDebt.amount.toLocaleString()} ({deletingDebt.productDescription || 'bidhaa'})?
+                Una uhakika unataka kufuta rekodi hii ya deni la {formatCurrency(deletingDebt.amount, settings.currencySymbol)} ({deletingDebt.productDescription || 'bidhaa'})?
               </p>
 
               <div className="flex items-center justify-end gap-2.5">

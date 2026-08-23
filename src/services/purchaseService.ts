@@ -27,11 +27,15 @@ export class PurchaseService {
     },
     currentUser: User
   ): { success: boolean; purchase?: Purchase; error?: string } {
-    if (currentUser.role !== 'ADMIN') {
-      return { success: false, error: 'Permission Denied: Only Admin can record purchases.' };
-    }
-
     const targetShopId = params.shopId || db.getShops()[0]?.id || 'shop-1';
+    
+    // Check role and shop assignment permissions
+    if (currentUser.role === 'SELLER') {
+      const assigned = currentUser.assignedShopIds || [];
+      if (assigned.length > 0 && !assigned.includes(targetShopId)) {
+        return { success: false, error: 'Permission Denied: You are not assigned to record purchases for this shop.' };
+      }
+    }
     const shop = db.getShops().find(s => s.id === targetShopId);
     if (!shop) {
       return { success: false, error: 'Selected shop does not exist.' };

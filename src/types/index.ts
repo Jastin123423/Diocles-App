@@ -35,6 +35,9 @@ export interface Category {
   name: string;
   icon?: string;
   color?: string;
+  status?: 'ACTIVE' | 'INACTIVE';
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export type ProductStatus = 'ACTIVE' | 'INACTIVE';
@@ -47,6 +50,7 @@ export interface Product {
   barcode: string;
   categoryId: string;
   sellingPrice: number;
+  proposedSellingPrice?: number; // Proposed price alias
   purchasePrice: number; // Cost of goods
   currentStock: number;
   minStock: number;
@@ -100,7 +104,7 @@ export interface Sale {
   items: SaleItem[];
 }
 
-export type MovementType = 'SALE' | 'PURCHASE' | 'ADJUSTMENT' | 'CORRECTION' | 'RETURN' | 'VOID_RETURN';
+export type MovementType = 'SALE' | 'PURCHASE' | 'ADJUSTMENT' | 'CORRECTION' | 'RETURN' | 'VOID_RETURN' | 'DAMAGED' | 'BROKEN' | 'EXPIRED' | 'LOST';
 
 export interface InventoryMovement {
   id: string;
@@ -113,6 +117,7 @@ export interface InventoryMovement {
   newQty: number;
   type: MovementType;
   reason: string;
+  costValue?: number; // Financial cost/loss value calculated based on purchase price
   referenceId?: string; // sale ID or purchase ID
   userId: string;
   userName: string;
@@ -192,6 +197,7 @@ export interface BusinessSettings {
   receiptPaperWidth: '80mm' | '58mm' | 'A4';
   lowStockThresholdDefault: number;
   logoUrl?: string;
+  themePrimaryColor?: string;
 }
 
 export interface AuditLog {
@@ -275,14 +281,30 @@ export interface ImportHistoryItem {
 // ==========================================
 export type DebtType = 'WE_DEMAND' | 'THEY_DEMAND'; // 'Tunadai' vs 'Wanatudai'
 
-export type DebtStatus = 'PENDING' | 'DUE_TODAY' | 'OVERDUE' | 'PAID' | 'CANCELLED' | 'ARCHIVED';
+export type DebtStatus = 'PENDING' | 'DUE_TODAY' | 'OVERDUE' | 'PARTIALLY_PAID' | 'PAID' | 'CANCELLED' | 'ARCHIVED';
+
+export interface DebtPayment {
+  id: string;
+  debtId: string;
+  amount: number;
+  paymentDate: string;
+  paymentMethod?: string;
+  paidByUserId: string;
+  paidByName: string;
+  notes?: string;
+  remainingAfter: number;
+  createdAt: string;
+}
 
 export interface DebtRecord {
   id: string;
   type: DebtType; // 'WE_DEMAND' (Tunadai - People who owe us) | 'THEY_DEMAND' (Wanatudai - People we owe)
   debtorName: string; // Required (Customer/Person or Supplier/Entity)
   productDescription?: string; // Manually typed plain text ONLY (e.g., "Daftari", "Simenti") - NO link to Products
-  amount: number; // Required, in TSh
+  amount: number; // Required, Original Total Debt in TSh
+  paidAmount?: number; // Total amount paid so far
+  remainingAmount?: number; // amount - (paidAmount || 0)
+  payments?: DebtPayment[]; // Detailed installment payment history
   dueDate?: string; // Optional payment date (YYYY-MM-DD)
   contact?: string; // Optional phone/contact info
   notes?: string; // Optional notes
@@ -332,9 +354,12 @@ export type NotificationType =
   | 'DEBT_OVERDUE_CUSTOMER'   // [Name] kachelewa kulipa Sh [Amount] ya [Desc]. Zimepita siku [X]
   | 'DEBT_OVERDUE_COMPANY'    // Malipo ya [Desc] kwa [Name] yamechelewa. Zimepita siku [X]
   | 'STOCK_LOW'               // [Product] zimekaribia kuisha — zimebaki [Qty] (Shop-specific)
+  | 'STOCK_LOW_ADMIN'         // Low stock alert for admin
   | 'STOCK_OUT'               // [Product] zimeisha kabisa (Shop-specific)
+  | 'STOCK_OUT_ADMIN'         // Out of stock alert for admin
   | 'PRICE_CHANGE_SELLER'     // [Product] zimebadilishwa bei sasa zitauzwa Sh [Price] (Shop-specific)
   | 'PRICE_CHANGE_ADMIN'      // Taarifa imetumwa kwa wauzaji wa [Shop] juu ya mabadiliko ya bei ya [Product]
+  | 'LOSS_OCCURRED'
   | 'SYSTEM_EVENT';
 
 export interface AppNotification {

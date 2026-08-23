@@ -2,6 +2,7 @@ import { db } from '../db/storage';
 import { Sale, SaleItem, PaymentMethod, User } from '../types';
 import { generateUUID } from '../utils/crypto';
 import { generateReceiptNumber } from '../utils/formatters';
+import { NotificationService } from './notificationService';
 
 export interface CartItemInput {
   productId: string;
@@ -90,9 +91,9 @@ export class SalesService {
 
     const overallDiscount = params.discount || 0;
     const discountedSubtotal = Math.max(0, subtotal - overallDiscount);
-    const taxRate = settings.enableTax ? settings.taxRatePercent / 100 : 0;
-    const taxAmount = Number((discountedSubtotal * taxRate).toFixed(2));
-    const finalTotal = Number((discountedSubtotal + taxAmount).toFixed(2));
+    // Tax completely removed per requirement
+    const taxAmount = 0;
+    const finalTotal = Number(discountedSubtotal.toFixed(2));
 
     if (params.amountReceived < finalTotal && params.paymentMethod === 'CASH') {
       return {
@@ -184,7 +185,7 @@ export class SalesService {
       createdAt: new Date().toISOString(),
     });
 
-    // 5. Audit Log
+    // 5. Audit Log & Loss Notifications
     db.addAuditLog({
       id: generateUUID(),
       userId: currentUser.id,
@@ -194,6 +195,14 @@ export class SalesService {
       entityType: 'SALE',
       entityId: saleId,
       timestamp: new Date().toISOString(),
+    });
+
+    // Check for items sold below purchase price
+    saleItems.forEach(item => {
+      const prod = products.find(p => p.id === item.productId);
+      if (prod && prod.purchasePrice > 0 && item.unitPrice < prod.purchasePrice) {
+        NotificationService.notifyBelowCostSale(prod, item.unitPrice, currentUser, shop.name, receiptNumber);
+      }
     });
 
     return { success: true, sale: newSale };

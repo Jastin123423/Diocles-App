@@ -18,7 +18,7 @@ import { ReportService } from '../../services/reportService';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 
 export const AdminDashboard: React.FC = () => {
-  const { currentUser, dbState, setActiveTab, showReceipt } = useApp();
+  const { currentUser, dbState, setActiveTab, showReceipt, selectedShopId, currentShop } = useApp();
   const [timeFilter, setTimeFilter] = useState<'today' | 'week' | 'month' | 'all'>('today');
 
   if (!currentUser || currentUser.role !== 'ADMIN') return null;
@@ -44,13 +44,21 @@ export const AdminDashboard: React.FC = () => {
   }, [timeFilter]);
 
   const summary = useMemo(() => {
-    return ReportService.getFinancialSummary(dateRange, currentUser);
-  }, [dateRange, currentUser, dbState]);
+    return ReportService.getFinancialSummary(
+      dateRange,
+      { shopId: selectedShopId },
+      currentUser
+    );
+  }, [dateRange, selectedShopId, currentUser, dbState]);
 
-  // Inventory stats
+  // Inventory stats filtered by shop if specific shop is selected
   const lowStockProducts = (dbState.products || []).filter(
-    p => p.status === 'ACTIVE' && p.currentStock <= p.minStock
+    p => p.status === 'ACTIVE' && p.currentStock <= p.minStock && (!selectedShopId || selectedShopId === 'ALL' || p.shopId === selectedShopId)
   );
+
+  const shopScopeLabel = selectedShopId === 'ALL' 
+    ? 'Company Overview (All Shops)' 
+    : currentShop?.name || 'Selected Shop';
 
   return (
     <div id="admin-dashboard-view" className="flex-1 p-6 bg-slate-950 text-slate-100 overflow-y-auto">
@@ -59,12 +67,14 @@ export const AdminDashboard: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-xl font-bold text-white tracking-tight">Executive Business Overview</h2>
-            <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/30">
-              Admin Exclusive
+            <span className="px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 text-[10px] font-bold border border-blue-500/30">
+              {shopScopeLabel}
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
-            Real-time local financial analytics, sales velocity, profit margins & inventory metrics
+            {selectedShopId === 'ALL' 
+              ? 'Consolidated company-wide financial performance across all business units' 
+              : `Real-time analytics and financial metrics for ${currentShop?.name || 'selected shop'}`}
           </p>
         </div>
 
@@ -297,7 +307,8 @@ export const AdminDashboard: React.FC = () => {
               <tr className="border-b border-slate-800 text-slate-400">
                 <th className="pb-2.5 font-semibold">Receipt #</th>
                 <th className="pb-2.5 font-semibold">Date & Time</th>
-                <th className="pb-2.5 font-semibold">Cashier</th>
+                <th className="pb-2.5 font-semibold">Products Sold</th>
+                <th className="pb-2.5 font-semibold">Shop & Cashier</th>
                 <th className="pb-2.5 font-semibold">Payment</th>
                 <th className="pb-2.5 text-right font-semibold">Cost (COGS)</th>
                 <th className="pb-2.5 text-right font-semibold">Total Revenue</th>
@@ -306,35 +317,64 @@ export const AdminDashboard: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
-              {(summary.filteredSales || []).slice(0, 6).map(sale => (
-                <tr key={sale.id} className="hover:bg-slate-850/60 transition">
-                  <td className="py-3 font-mono font-semibold text-white">{sale.receiptNumber}</td>
-                  <td className="py-3 text-slate-400">{formatDateTime(sale.createdAt)}</td>
-                  <td className="py-3 text-slate-300">{sale.sellerName}</td>
-                  <td className="py-3">
-                    <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] uppercase font-medium">
-                      {sale.paymentMethod}
-                    </span>
-                  </td>
-                  <td className="py-3 text-right font-mono text-slate-400">
-                    {formatCurrency(sale.costOfGoods, settings.currencySymbol)}
-                  </td>
-                  <td className="py-3 text-right font-mono font-bold text-white">
-                    {formatCurrency(sale.total, settings.currencySymbol)}
-                  </td>
-                  <td className="py-3 text-right font-mono font-bold text-emerald-400">
-                    +{formatCurrency(sale.grossProfit, settings.currencySymbol)}
-                  </td>
-                  <td className="py-3 text-right">
-                    <button
-                      onClick={() => showReceipt(sale)}
-                      className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium transition"
-                    >
-                      Receipt
-                    </button>
+              {(summary.filteredSales || []).length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="py-8 text-center text-slate-500">
+                    No transactions found for the selected shop/period.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                (summary.filteredSales || []).slice(0, 6).map(sale => (
+                  <tr key={sale.id} className="hover:bg-slate-850/60 transition">
+                    <td className="py-3 font-mono font-semibold text-white">
+                      <div>{sale.receiptNumber}</div>
+                    </td>
+                    <td className="py-3 text-slate-400 whitespace-nowrap">
+                      {formatDateTime(sale.createdAt)}
+                    </td>
+                    <td className="py-3 max-w-xs">
+                      <div className="flex flex-wrap gap-1">
+                        {(sale.items || []).map((item, idx) => (
+                          <span
+                            key={idx}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700/60 text-[11px] text-slate-200"
+                            title={`${item.quantity}x ${item.productName} @ ${formatCurrency(item.unitPrice, settings.currencySymbol)}`}
+                          >
+                            <span className="font-bold text-blue-400">{item.quantity}x</span>
+                            <span className="truncate max-w-[120px]">{item.productName}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="py-3 text-slate-300">
+                      <div className="font-medium text-white">{sale.sellerName}</div>
+                      <div className="text-[10px] text-slate-500">{sale.shopName}</div>
+                    </td>
+                    <td className="py-3">
+                      <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] uppercase font-medium">
+                        {sale.paymentMethod}
+                      </span>
+                    </td>
+                    <td className="py-3 text-right font-mono text-slate-400">
+                      {formatCurrency(sale.costOfGoods, settings.currencySymbol)}
+                    </td>
+                    <td className="py-3 text-right font-mono font-bold text-white">
+                      {formatCurrency(sale.total, settings.currencySymbol)}
+                    </td>
+                    <td className="py-3 text-right font-mono font-bold text-emerald-400">
+                      +{formatCurrency(sale.grossProfit, settings.currencySymbol)}
+                    </td>
+                    <td className="py-3 text-right">
+                      <button
+                        onClick={() => showReceipt(sale)}
+                        className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium transition"
+                      >
+                        Receipt
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

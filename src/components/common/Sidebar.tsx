@@ -50,6 +50,7 @@ export const Sidebar: React.FC = () => {
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'new_sale', label: 'New Sale (POS)', icon: ShoppingCart },
     { id: 'products', label: 'Products', icon: Package, badge: lowStockCount > 0 ? lowStockCount : undefined },
+    { id: 'purchases', label: 'Purchases & Stock In', icon: Truck },
     { id: 'my_sales', label: 'My Sales', icon: History },
     { id: 'debts', label: 'Madeni (Debts)', icon: FileText, badge: overdueDebtsCount > 0 ? `${overdueDebtsCount} Overdue` : debts.filter(d => d.status !== 'PAID').length || undefined, badgeColor: overdueDebtsCount > 0 ? 'red' : 'amber' },
     { id: 'notifications', label: 'Taarifa & Vikumbusho', icon: Bell, badge: unreadNotifsCount > 0 ? unreadNotifsCount : undefined, badgeColor: 'red' },
@@ -59,11 +60,12 @@ export const Sidebar: React.FC = () => {
 
   const adminNav: NavItem[] = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'new_sale', label: 'New Sale (POS)', icon: ShoppingCart },
     { id: 'shops', label: 'Shops & Units', icon: Store, badge: (dbState.shops || []).length },
-    { id: 'sales', label: 'Sales History', icon: ShoppingCart },
+    { id: 'sales', label: 'Sales History', icon: History },
     { id: 'debts', label: 'Debt Management (Madeni)', icon: FileText, badge: overdueDebtsCount > 0 ? `${overdueDebtsCount} Overdue` : undefined, badgeColor: 'red' },
     { id: 'notifications', label: 'Notification Center', icon: Bell, badge: unreadNotifsCount > 0 ? unreadNotifsCount : undefined, badgeColor: 'red' },
-    { id: 'products', label: 'Products', icon: Package },
+    { id: 'products', label: 'Products & Categories', icon: Package },
     { id: 'inventory', label: 'Inventory', icon: Boxes, badge: lowStockCount > 0 ? `${lowStockCount} Low` : undefined },
     { id: 'sellers', label: 'Sellers', icon: Users },
     { id: 'purchases', label: 'Purchases', icon: Truck },

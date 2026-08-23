@@ -17,7 +17,7 @@ import { InventoryService } from '../../services/inventoryService';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 
 export const AdminInventory: React.FC = () => {
-  const { currentUser, dbState, addToast } = useApp();
+  const { currentUser, dbState, addToast, selectedShopId } = useApp();
   const [activeTab, setActiveTabState] = useState<'stock' | 'movements'>('stock');
   const [searchQuery, setSearchQuery] = useState('');
   const [movementTypeFilter, setMovementTypeFilter] = useState('ALL');
@@ -25,26 +25,39 @@ export const AdminInventory: React.FC = () => {
   // Stock Adjustment Modal
   const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
   const [selectedProductId, setSelectedProductId] = useState('');
-  const [adjustmentType, setAdjustmentType] = useState<'IN' | 'OUT' | 'SET'>('IN');
-  const [quantityInput, setQuantityInput] = useState('10');
+  const [adjustmentCategory, setAdjustmentCategory] = useState<'DAMAGED' | 'BROKEN' | 'EXPIRED' | 'LOST' | 'CORRECTION' | 'RESTOCK'>('CORRECTION');
+  const [adjustmentType, setAdjustmentType] = useState<'IN' | 'OUT' | 'SET'>('OUT');
+  const [quantityInput, setQuantityInput] = useState('5');
   const [reasonInput, setReasonInput] = useState('');
   const [modalError, setModalError] = useState('');
 
   if (!currentUser || currentUser.role !== 'ADMIN') return null;
 
   const settings = dbState.settings;
-  const valuation = InventoryService.getInventoryValuation(currentUser);
-  const movements = InventoryService.getMovementHistory(
+  const valuation = InventoryService.getInventoryValuation(selectedShopId, currentUser);
+  const allMovements = InventoryService.getMovementHistory(
     {
+      shopId: selectedShopId === 'ALL' ? undefined : selectedShopId,
       search: searchQuery,
     },
     currentUser
   );
 
-  const products = dbState.products.filter(p => {
-    const q = searchQuery.toLowerCase().trim();
-    return !q || p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q);
+  const movements = allMovements.filter(m => {
+    if (movementTypeFilter === 'ALL') return true;
+    return m.type === movementTypeFilter;
   });
+
+  const products = dbState.products.filter(p => {
+    const matchesShop = selectedShopId === 'ALL' || p.shopId === selectedShopId;
+    const q = searchQuery.toLowerCase().trim();
+    const matchesSearch = !q || p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q);
+    return matchesShop && matchesSearch;
+  });
+
+  const selectedProduct = dbState.products.find(p => p.id === selectedProductId);
+  const inputQty = parseInt(quantityInput, 10) || 0;
+  const calculatedLossValue = selectedProduct ? (inputQty * (selectedProduct.purchasePrice || 0)) : 0;
 
   const handleAdjustStock = (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,11 +75,6 @@ export const AdminInventory: React.FC = () => {
       return;
     }
 
-    if (!reasonInput.trim()) {
-      setModalError('Please provide an adjustment reason.');
-      return;
-    }
-
     let delta = 0;
     if (adjustmentType === 'IN') {
       delta = qty;
@@ -76,23 +84,28 @@ export const AdminInventory: React.FC = () => {
       delta = qty - targetProduct.currentStock;
     }
 
+    const finalReason = reasonInput.trim() 
+      ? `[${adjustmentCategory}] ${reasonInput.trim()}`
+      : `[${adjustmentCategory}] Stock adjustment`;
+
     const res = InventoryService.adjustStock(
       selectedProductId,
-      delta,
-      reasonInput.trim(),
-      currentUser
+      targetProduct.currentStock + delta,
+      finalReason,
+      currentUser,
+      adjustmentCategory
     );
 
     if (res.success) {
       addToast({
         type: 'success',
-        title: 'Stock Updated',
-        description: `Inventory for '${targetProduct.name}' updated by ${delta > 0 ? '+' : ''}${delta} ${targetProduct.unit}.`,
+        title: 'Stock Adjustment Logged',
+        description: `Inventory for '${targetProduct.name}' updated (${delta > 0 ? '+' : ''}${delta} ${targetProduct.unit}). Loss/Cost valuation recorded.`,
       });
       setIsAdjustModalOpen(false);
       setSelectedProductId('');
       setReasonInput('');
-      setQuantityInput('10');
+      setQuantityInput('5');
     } else {
       setModalError(res.error || 'Failed to adjust stock.');
     }
@@ -289,10 +302,15 @@ export const AdminInventory: React.FC = () => {
               className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               <option value="ALL">All Movement Types</option>
-              <option value="SALE">Sales (Decrements)</option>
-              <option value="PURCHASE">Purchases / Supplier Stock In</option>
-              <option value="ADJUSTMENT">Manual Adjustments</option>
-              <option value="RETURN">Sales Returns / Void Restocks</option>
+              <option value="DAMAGED">💥 Damaged Stock</option>
+              <option value="BROKEN">🔨 Broken Stock</option>
+              <option value="EXPIRED">⏳ Expired Items</option>
+              <option value="LOST">🔍 Lost / Missing</option>
+              <option value="CORRECTION">⚖️ Count Corrections</option>
+              <option value="RESTOCK">📦 Restock Adjustments</option>
+              <option value="SALE">🛒 Sales (Decrements)</option>
+              <option value="PURCHASE">🚚 Purchases / Stock In</option>
+              <option value="RETURN">↩️ Returns / Restocks</option>
             </select>
           </div>
 
@@ -306,6 +324,7 @@ export const AdminInventory: React.FC = () => {
                   <th className="py-3 px-4 text-center font-semibold">Quantity Delta</th>
                   <th className="py-3 px-4 text-center font-semibold">Stock Before</th>
                   <th className="py-3 px-4 text-center font-semibold">Stock After</th>
+                  <th className="py-3 px-4 text-right font-semibold">Cost / Loss Value</th>
                   <th className="py-3 px-4 font-semibold">Reason / Reference</th>
                   <th className="py-3 px-4 font-semibold">User</th>
                 </tr>
@@ -313,13 +332,18 @@ export const AdminInventory: React.FC = () => {
               <tbody className="divide-y divide-slate-800/60">
                 {movements.map(m => {
                   const isPositive = m.changeQty > 0;
+                  const isLossType = ['DAMAGED', 'BROKEN', 'EXPIRED', 'LOST'].includes(m.type);
 
                   return (
                     <tr key={m.id} className="hover:bg-slate-850/60 transition">
                       <td className="py-3 px-4 text-slate-400 font-mono">{formatDateTime(m.createdAt)}</td>
                       <td className="py-3 px-4 font-medium text-white">{m.productName}</td>
                       <td className="py-3 px-4">
-                        <span className="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-slate-300">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          isLossType
+                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                            : 'bg-slate-800 text-slate-300'
+                        }`}>
                           {m.type}
                         </span>
                       </td>
@@ -330,6 +354,15 @@ export const AdminInventory: React.FC = () => {
                       </td>
                       <td className="py-3 px-4 text-center font-mono text-slate-400">{m.previousQty}</td>
                       <td className="py-3 px-4 text-center font-mono text-white font-semibold">{m.newQty}</td>
+                      <td className="py-3 px-4 text-right font-mono font-medium">
+                        {m.costValue !== undefined ? (
+                          <span className={isLossType ? 'text-rose-400 font-bold' : 'text-slate-300'}>
+                            {formatCurrency(m.costValue, settings.currencySymbol)}
+                          </span>
+                        ) : (
+                          <span className="text-slate-600">-</span>
+                        )}
+                      </td>
                       <td className="py-3 px-4 text-slate-300 max-w-[200px] truncate">{m.reason}</td>
                       <td className="py-3 px-4 text-slate-400">{m.userName}</td>
                     </tr>
@@ -348,7 +381,7 @@ export const AdminInventory: React.FC = () => {
             <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
               <div className="flex items-center gap-2">
                 <ArrowUpDown className="w-5 h-5 text-blue-400" />
-                <h3 className="text-base font-bold text-white">Stock Adjustment</h3>
+                <h3 className="text-base font-bold text-white">Stock Adjustment & Loss Tracking</h3>
               </div>
               <button
                 onClick={() => setIsAdjustModalOpen(false)}
@@ -372,11 +405,36 @@ export const AdminInventory: React.FC = () => {
                   onChange={e => setSelectedProductId(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
+                  <option value="">-- Choose Product --</option>
                   {dbState.products.map(p => (
                     <option key={p.id} value={p.id}>
-                      {p.name} (Current: {p.currentStock} {p.unit})
+                      {p.name} (Current: {p.currentStock} {p.unit}, Cost: {formatCurrency(p.purchasePrice, settings.currencySymbol)})
                     </option>
                   ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">Adjustment Reason Category *</label>
+                <select
+                  value={adjustmentCategory}
+                  onChange={e => {
+                    const cat = e.target.value as any;
+                    setAdjustmentCategory(cat);
+                    if (['DAMAGED', 'BROKEN', 'EXPIRED', 'LOST'].includes(cat)) {
+                      setAdjustmentType('OUT');
+                    } else if (cat === 'RESTOCK') {
+                      setAdjustmentType('IN');
+                    }
+                  }}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  <option value="DAMAGED">💥 Damaged Goods (Broken in handling)</option>
+                  <option value="BROKEN">🔨 Broken Items (Defective / Unusable)</option>
+                  <option value="EXPIRED">⏳ Expired Products</option>
+                  <option value="LOST">🔍 Lost / Missing Stock</option>
+                  <option value="CORRECTION">⚖️ Inventory Count Correction</option>
+                  <option value="RESTOCK">📦 Restock / Found Stock</option>
                 </select>
               </div>
 
@@ -433,14 +491,28 @@ export const AdminInventory: React.FC = () => {
                 />
               </div>
 
+              {/* Financial Cost / Loss Impact Preview */}
+              {selectedProduct && adjustmentType === 'OUT' && (
+                <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-xs space-y-1">
+                  <div className="flex justify-between text-rose-300 font-medium">
+                    <span>Estimated Loss (at purchase cost):</span>
+                    <span className="font-bold font-mono">
+                      {formatCurrency(calculatedLossValue, settings.currencySymbol)}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Calculated based on unit purchase cost ({formatCurrency(selectedProduct.purchasePrice, settings.currencySymbol)}/unit).
+                  </p>
+                </div>
+              )}
+
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Reason / Notes *</label>
+                <label className="block text-slate-300 font-medium mb-1">Notes / Explanation (Optional)</label>
                 <textarea
-                  required
                   rows={2}
                   value={reasonInput}
                   onChange={e => setReasonInput(e.target.value)}
-                  placeholder="e.g. Physical inventory count discrepancy / Damaged units discarded"
+                  placeholder="e.g. Broken in shipment transit, water leak damage..."
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
               </div>

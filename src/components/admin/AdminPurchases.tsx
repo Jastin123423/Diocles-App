@@ -22,11 +22,12 @@ interface PurchaseItemInput {
 }
 
 export const AdminPurchases: React.FC = () => {
-  const { currentUser, dbState, addToast } = useApp();
+  const { currentUser, dbState, addToast, selectedShopId, currentShop } = useApp();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Purchase Form state
+  const [purchaseShopId, setPurchaseShopId] = useState('');
   const [supplierName, setSupplierName] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
   const [paymentStatus, setPaymentStatus] = useState<'PAID' | 'PARTIAL' | 'UNPAID'>('PAID');
@@ -34,21 +35,47 @@ export const AdminPurchases: React.FC = () => {
   const [items, setItems] = useState<PurchaseItemInput[]>([]);
   const [formError, setFormError] = useState('');
 
-  if (!currentUser || currentUser.role !== 'ADMIN') return null;
+  if (!currentUser) return null;
 
   const settings = dbState.settings;
-  const purchases = PurchaseService.getPurchases({ search: searchQuery }, currentUser);
+  const isSeller = currentUser.role === 'SELLER';
+  
+  // Available shops for this user
+  const availableShops = dbState.shops.filter(s => {
+    if (currentUser.role === 'ADMIN') return true;
+    const assigned = currentUser.assignedShopIds || [];
+    return assigned.length === 0 || assigned.includes(s.id);
+  });
+
+  const activeShopId = purchaseShopId || currentShop?.id || selectedShopId || availableShops[0]?.id || 'shop-1';
+
+  // Available products for the selected purchase shop
+  const shopProducts = dbState.products.filter(p => !purchaseShopId || purchaseShopId === 'ALL' || p.shopId === purchaseShopId);
+
+  const purchases = PurchaseService.getPurchases(
+    {
+      shopId: isSeller ? (currentShop?.id || selectedShopId) : (selectedShopId === 'ALL' ? undefined : selectedShopId),
+      search: searchQuery,
+    },
+    currentUser
+  );
 
   const openNewPurchaseModal = () => {
+    const targetShop = currentShop?.id || (selectedShopId !== 'ALL' ? selectedShopId : availableShops[0]?.id) || 'shop-1';
+    setPurchaseShopId(targetShop);
     setSupplierName('');
     setInvoiceNumber('');
     setPaymentStatus('PAID');
     setNotes('');
+    
+    const prodList = dbState.products.filter(p => p.shopId === targetShop);
+    const initialProd = prodList[0] || dbState.products[0];
+    
     setItems([
       {
-        productId: dbState.products[0]?.id || '',
+        productId: initialProd?.id || '',
         quantity: 10,
-        unitCost: dbState.products[0]?.purchasePrice || 0,
+        unitCost: initialProd?.purchasePrice || 0,
       },
     ]);
     setFormError('');
@@ -56,12 +83,14 @@ export const AdminPurchases: React.FC = () => {
   };
 
   const addItemRow = () => {
+    const prodList = dbState.products.filter(p => !purchaseShopId || p.shopId === purchaseShopId);
+    const prod = prodList[0] || dbState.products[0];
     setItems(prev => [
       ...prev,
       {
-        productId: dbState.products[0]?.id || '',
+        productId: prod?.id || '',
         quantity: 5,
-        unitCost: dbState.products[0]?.purchasePrice || 0,
+        unitCost: prod?.purchasePrice || 0,
       },
     ]);
   };
@@ -105,6 +134,7 @@ export const AdminPurchases: React.FC = () => {
 
     const res = PurchaseService.createPurchase(
       {
+        shopId: purchaseShopId || availableShops[0]?.id || 'shop-1',
         supplierName: supplierName.trim(),
         invoiceNumber: invoiceNumber.trim() || undefined,
         items,
@@ -249,6 +279,21 @@ export const AdminPurchases: React.FC = () => {
             )}
 
             <form onSubmit={handleSavePurchase} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">Target Shop / Unit *</label>
+                <select
+                  value={purchaseShopId}
+                  onChange={e => setPurchaseShopId(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                >
+                  {availableShops.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.code || 'UNIT'})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Supplier / Vendor Name *</label>
@@ -302,9 +347,9 @@ export const AdminPurchases: React.FC = () => {
                           onChange={e => updateItemRow(idx, 'productId', e.target.value)}
                           className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white"
                         >
-                          {dbState.products.map(p => (
+                          {(shopProducts.length > 0 ? shopProducts : dbState.products).map(p => (
                             <option key={p.id} value={p.id}>
-                              {p.name} ({p.sku})
+                              {p.name} ({p.sku}) - Current Stock: {p.currentStock} {p.unit}
                             </option>
                           ))}
                         </select>

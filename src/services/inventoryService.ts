@@ -1,18 +1,19 @@
 import { db } from '../db/storage';
-import { InventoryMovement, User } from '../types';
+import { InventoryMovement, MovementType, User } from '../types';
 import { generateUUID } from '../utils/crypto';
 
 export class InventoryService {
   /**
-   * Adjust stock manually for count correction or physical inventory.
-   * Admin only.
+   * Adjust stock manually for count correction, damage, loss, or physical inventory.
+   * Admin only. Calculates loss value at purchase cost.
    */
   public static adjustStock(
     productId: string,
     newQuantity: number,
     reason: string,
-    currentUser: User
-  ): { success: boolean; error?: string } {
+    currentUser: User,
+    movementType: MovementType = 'ADJUSTMENT'
+  ): { success: boolean; error?: string; lossValue?: number } {
     if (currentUser.role !== 'ADMIN') {
       return { success: false, error: 'Permission Denied: Only Admin can adjust stock levels.' };
     }
@@ -36,6 +37,7 @@ export class InventoryService {
     }
 
     const shop = db.getShops().find(s => s.id === prod.shopId);
+    const costValue = Number((Math.abs(diff) * (prod.purchasePrice || 0)).toFixed(2));
 
     products[prodIndex] = {
       ...prod,
@@ -53,7 +55,8 @@ export class InventoryService {
       previousQty: prevQty,
       changeQty: diff,
       newQty: newQuantity,
-      type: 'ADJUSTMENT',
+      type: movementType,
+      costValue,
       reason: `${reason.trim()} [${shop?.name || 'Shop'}]`,
       userId: currentUser.id,
       userName: currentUser.name,
@@ -66,7 +69,7 @@ export class InventoryService {
       operation: 'STOCK_ADJUSTMENT',
       entityType: 'INVENTORY',
       entityId: prod.id,
-      payload: { productId, previousQty: prevQty, newQty: newQuantity, reason, shopId: prod.shopId },
+      payload: { productId, previousQty: prevQty, newQty: newQuantity, reason, shopId: prod.shopId, costValue, movementType },
       status: 'PENDING',
       createdAt: new Date().toISOString(),
     });
@@ -76,13 +79,13 @@ export class InventoryService {
       userId: currentUser.id,
       userName: currentUser.name,
       action: 'STOCK_ADJUSTMENT',
-      details: `Adjusted '${prod.name}' stock from ${prevQty} to ${newQuantity} (${reason.trim()}) in [${shop?.name || 'Shop'}]`,
+      details: `Adjusted '${prod.name}' stock from ${prevQty} to ${newQuantity} (${movementType}: ${reason.trim()}, Cost Impact: $${costValue}) in [${shop?.name || 'Shop'}]`,
       entityType: 'INVENTORY',
       entityId: prod.id,
       timestamp: new Date().toISOString(),
     });
 
-    return { success: true };
+    return { success: true, lossValue: diff < 0 ? costValue : 0 };
   }
 
   /**
