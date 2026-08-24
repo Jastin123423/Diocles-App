@@ -1,7 +1,7 @@
+ 
 import { db } from '../db/storage';
 import { User } from '../types';
 import { generateUUID } from '../utils/crypto';
-import { CloudflareApi } from '../api/cloudflareApi';
 
 export class BackupService {
   /**
@@ -41,46 +41,6 @@ export class BackupService {
     a.download = res.filename || `omnibiz_backup_${Date.now()}.json`;
     a.click();
     URL.revokeObjectURL(url);
-  }
-
-  /**
-   * Upload full database backup to cloud storage.
-   * Restricted to Admin.
-   */
-  public static async uploadBackupToCloud(currentUser: User): Promise<{ success: boolean; message?: string }> {
-    if (currentUser.role !== 'ADMIN') {
-      return { success: false, message: 'Permission Denied: Only Admin can upload backups.' };
-    }
-
-    const online = await CloudflareApi.checkConnection();
-    if (!online) {
-      return { success: false, message: 'Offline: Cannot upload backup to cloud.' };
-    }
-
-    try {
-      const backupData = db.exportFullBackup();
-      const blob = new Blob([backupData], { type: 'application/json' });
-      
-      const result = await CloudflareApi.uploadBackup(blob);
-      
-      if (result.success) {
-        db.addAuditLog({
-          id: generateUUID(),
-          userId: currentUser.id,
-          userName: currentUser.name,
-          action: 'UPLOAD_BACKUP_CLOUD',
-          details: `Uploaded full database backup to cloud storage (${result.key})`,
-          entityType: 'BACKUP',
-          timestamp: new Date().toISOString(),
-        });
-        
-        return { success: true, message: `Backup uploaded successfully to cloud (${result.size} bytes)` };
-      }
-      
-      return { success: false, message: 'Failed to upload backup.' };
-    } catch (error: any) {
-      return { success: false, message: error.message };
-    }
   }
 
   /**
