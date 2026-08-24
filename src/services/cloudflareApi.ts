@@ -5,11 +5,11 @@ export interface CloudflareConfig {
 }
 
 export class CloudflareApi {
-  private static config: CloudflareConfig = {
-    baseUrl: 'baseUrl: 'https://diocles-app.pages.dev', 
-    deviceId: '',
-  };
-
+private static config: CloudflareConfig = {
+  baseUrl: 'https://diocles-app.pages.dev',
+  deviceId: '',
+};
+  
   private static token: string | null = localStorage.getItem('omnibiz_auth_token');
 
   // ==========================================
