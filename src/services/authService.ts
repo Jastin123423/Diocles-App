@@ -1,7 +1,8 @@
-// src/services/authService.ts (ORIGINAL)
+// src/services/authService.ts (UPDATED WITH CLOUD SYNC)
 import { db } from '../db/storage';
 import { User, UserRole } from '../types';
 import { hashPassword, verifyPassword, generateUUID } from '../utils/crypto';
+import { CloudflareApi } from './cloudflareApi';
 
 const AUTH_STORAGE_KEY = 'omnibiz_active_session_v1';
 
@@ -16,6 +17,53 @@ export class AuthService {
     const user = users.find(u => u.username.toLowerCase() === trimmedUsername);
 
     if (!user) {
+      // Try cloud login if local user not found
+      try {
+        const online = await CloudflareApi.checkConnection();
+        if (online) {
+          const cloudResult = await CloudflareApi.login(username, plainPassword);
+          if (cloudResult.success && cloudResult.user) {
+            // Sync cloud user to local
+            const cloudUser: User = {
+              id: cloudResult.user.id,
+              username: cloudResult.user.username,
+              name: cloudResult.user.name,
+              role: cloudResult.user.role,
+              passwordHash: await hashPassword(plainPassword),
+              color: cloudResult.user.color || 'blue',
+              status: cloudResult.user.status || 'ACTIVE',
+              assignedShopIds: cloudResult.user.assignedShopIds || [],
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+            
+            const updatedUsers = [...db.getUsers().filter(u => u.id !== cloudUser.id), cloudUser];
+            db.saveUsers(updatedUsers);
+            
+            if (cloudResult.token) {
+              CloudflareApi.setToken(cloudResult.token);
+            }
+            
+            AuthService.setActiveUser(cloudUser);
+            
+            db.addAuditLog({
+              id: generateUUID(),
+              userId: cloudUser.id,
+              userName: cloudUser.name,
+              action: 'USER_LOGIN',
+              details: `${cloudUser.role} login successful via cloud (${cloudUser.username})`,
+              entityType: 'AUTH',
+              entityId: cloudUser.id,
+              timestamp: new Date().toISOString(),
+            });
+            
+            return { success: true, user: cloudUser };
+          }
+        }
+      } catch (error) {
+        console.log('Cloud login failed, continuing offline:', error);
+      }
+      
       return { success: false, error: 'Account not found. Please check your username.' };
     }
 
@@ -50,7 +98,7 @@ export class AuthService {
       }
     }
 
-    // Persist session
+    // Persist session locally
     AuthService.setActiveUser(user);
 
     // Audit log
@@ -64,6 +112,18 @@ export class AuthService {
       entityId: user.id,
       timestamp: new Date().toISOString(),
     });
+
+    // Try cloud login in background (non-blocking)
+    CloudflareApi.login(username, plainPassword)
+      .then(result => {
+        if (result.success && result.token) {
+          CloudflareApi.setToken(result.token);
+          console.log('Cloud token stored for future sync');
+        }
+      })
+      .catch(() => {
+        console.log('Cloud login deferred - will sync later');
+      });
 
     return { success: true, user };
   }
@@ -106,6 +166,12 @@ export class AuthService {
         entityId: user.id,
         timestamp: new Date().toISOString(),
       });
+      
+      // Sync logout to cloud (non-blocking)
+      CloudflareApi.logout(user.id).catch(() => {
+        console.log('Cloud logout deferred');
+      });
+      CloudflareApi.clearToken();
     }
     AuthService.setActiveUser(null);
   }
