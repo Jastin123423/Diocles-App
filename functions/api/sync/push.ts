@@ -1,4 +1,3 @@
-
 export async function onRequestPost(context: any) {
   const { request, env } = context;
   
@@ -19,26 +18,8 @@ export async function onRequestPost(context: any) {
       try {
         const result = await processOperation(env.DB, op);
         results.push({ id: op.id, success: true, ...result });
-        
-        await env.DB.prepare(`
-          INSERT INTO sync_queue_tracking (id, operation, entity_type, entity_id, payload, status, device_id, created_at, processed_at)
-          VALUES (?, ?, ?, ?, ?, 'SYNCED', ?, ?, ?)
-        `).bind(
-          op.id, op.operation || op.action, op.entityType, op.entityId,
-          JSON.stringify(op.payload), deviceId || 'unknown',
-          new Date().toISOString(), new Date().toISOString()
-        ).run();
       } catch (error: any) {
         errors.push({ id: op.id, error: error.message });
-        
-        await env.DB.prepare(`
-          INSERT INTO sync_queue_tracking (id, operation, entity_type, entity_id, payload, status, error_message, device_id, created_at)
-          VALUES (?, ?, ?, ?, ?, 'FAILED', ?, ?, ?)
-        `).bind(
-          op.id, op.operation || op.action, op.entityType, op.entityId,
-          JSON.stringify(op.payload), error.message, deviceId || 'unknown',
-          new Date().toISOString()
-        ).run();
       }
     }
 
@@ -103,10 +84,6 @@ async function processOperation(db: any, op: any) {
     
     case 'STOCK_ADJUSTMENT':
       await recordStockAdjustment(db, payload);
-      break;
-    
-    case 'UPDATE_SETTINGS':
-      await updateSettings(db, payload);
       break;
     
     default:
@@ -203,7 +180,6 @@ async function createSale(db: any, sale: any) {
     sale.status || 'COMPLETED', sale.notes || null, sale.createdAt || new Date().toISOString()
   ).run();
 
-  // Insert sale items
   for (const item of (sale.items || [])) {
     await db.prepare(`
       INSERT INTO sale_items (
@@ -222,11 +198,7 @@ async function createSale(db: any, sale: any) {
 
 async function voidSale(db: any, payload: any) {
   await db.prepare(`
-    UPDATE sales SET
-      status = 'VOIDED',
-      void_reason = ?,
-      voided_at = ?,
-      voided_by = ?
+    UPDATE sales SET status = 'VOIDED', void_reason = ?, voided_at = ?, voided_by = ?
     WHERE id = ?
   `).bind(
     payload.voidReason || '', payload.voidedAt || new Date().toISOString(),
@@ -320,18 +292,7 @@ async function recordStockAdjustment(db: any, movement: any) {
     movement.userId, movement.userName, movement.createdAt || new Date().toISOString()
   ).run();
 
-  // Update product stock
   await db.prepare(`
     UPDATE products SET current_stock = ?, updated_at = ? WHERE id = ?
   `).bind(movement.newQty, new Date().toISOString(), movement.productId).run();
-}
-
-async function updateSettings(db: any, settings: any) {
-  await db.prepare(`
-    UPDATE settings SET
-      business_name = COALESCE(?, business_name),
-      currency_symbol = COALESCE(?, currency_symbol),
-      updated_at = ?
-    WHERE id = 'global'
-  `).bind(settings.businessName, settings.currencySymbol, new Date().toISOString()).run();
 }
