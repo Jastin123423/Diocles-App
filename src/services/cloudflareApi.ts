@@ -6,7 +6,7 @@ export interface CloudflareConfig {
 
 export class CloudflareApi {
 private static config: CloudflareConfig = {
-  baseUrl: 'https://diocres.jobsreport.online/',
+  baseUrl: 'https://diocres.jobsreport.online',
   deviceId: '',
 };
   
