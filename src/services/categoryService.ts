@@ -98,6 +98,17 @@ export class CategoryService {
 
     db.saveCategories([...categories, newCategory]);
 
+    // Enqueue sync operation for category creation
+    db.enqueueSync({
+      id: generateUUID(),
+      operation: 'CREATE_CATEGORY',
+      entityType: 'CATEGORY',
+      entityId: newCategory.id,
+      payload: newCategory,
+      status: 'PENDING',
+      createdAt: new Date().toISOString(),
+    });
+
     db.addAuditLog({
       id: generateUUID(),
       userId: currentUser.id,
@@ -163,6 +174,17 @@ export class CategoryService {
     categories[index] = updatedCategory;
     db.saveCategories([...categories]);
 
+    // Enqueue sync operation for category update
+    db.enqueueSync({
+      id: generateUUID(),
+      operation: 'UPDATE_CATEGORY',
+      entityType: 'CATEGORY',
+      entityId: updatedCategory.id,
+      payload: updatedCategory,
+      status: 'PENDING',
+      createdAt: new Date().toISOString(),
+    });
+
     const shops = db.getShops();
     const shop = shops.find(s => s.id === updatedCategory.shopId);
 
@@ -194,4 +216,3 @@ export class CategoryService {
     return this.updateCategory(id, { status: newStatus }, currentUser);
   }
 }
-
