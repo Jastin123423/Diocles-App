@@ -15,12 +15,17 @@ import {
 import { useApp } from '../../context/AppContext';
 import { InventoryService } from '../../services/inventoryService';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
+import { Product } from '../../types';
+import { ProductThumbnail } from '../common/ProductThumbnail';
+import { ProductImageViewerModal } from '../common/ProductImageViewerModal';
 
 export const AdminInventory: React.FC = () => {
   const { currentUser, dbState, addToast, selectedShopId } = useApp();
   const [activeTab, setActiveTabState] = useState<'stock' | 'movements'>('stock');
   const [searchQuery, setSearchQuery] = useState('');
   const [movementTypeFilter, setMovementTypeFilter] = useState('ALL');
+  const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
 
   // Stock Adjustment Modal
   const [isAdjustModalOpen, setIsAdjustModalOpen] = useState(false);
@@ -246,7 +251,19 @@ export const AdminInventory: React.FC = () => {
                   return (
                     <tr key={p.id} className="hover:bg-slate-850/60 transition">
                       <td className="py-3 px-4 font-mono text-slate-400">{p.sku}</td>
-                      <td className="py-3 px-4 font-semibold text-white">{p.name}</td>
+                      <td className="py-3 px-4 font-semibold text-white">
+                        <div className="flex items-center gap-2.5">
+                          <ProductThumbnail
+                            product={p}
+                            size="sm"
+                            onClick={() => {
+                              setViewingProduct(p);
+                              setIsViewerOpen(true);
+                            }}
+                          />
+                          <span className="truncate">{p.name}</span>
+                        </div>
+                      </td>
                       <td className="py-3 px-4 text-center">
                         <span
                           className={`font-mono font-bold px-2 py-0.5 rounded text-[11px] ${
@@ -536,6 +553,14 @@ export const AdminInventory: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Product Image Gallery / Viewer Modal */}
+      <ProductImageViewerModal
+        product={viewingProduct}
+        isOpen={isViewerOpen}
+        onClose={() => setIsViewerOpen(false)}
+        currencySymbol={settings.currencySymbol}
+      />
     </div>
   );
 };

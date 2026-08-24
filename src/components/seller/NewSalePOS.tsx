@@ -19,6 +19,8 @@ import { useApp } from '../../context/AppContext';
 import { SalesService } from '../../services/salesService';
 import { Product, PaymentMethod } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
+import { ProductThumbnail } from '../common/ProductThumbnail';
+import { ProductImageViewerModal } from '../common/ProductImageViewerModal';
 
 interface CartItem {
   product: Product;
@@ -38,21 +40,27 @@ export const NewSalePOS: React.FC = () => {
   const [amountReceived, setAmountReceived] = useState<string>('');
   const [saleNotes, setSaleNotes] = useState<string>('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
 
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const settings = dbState.settings;
 
-  const targetShopId = currentShop?.id || selectedShopId || (dbState.shops[0]?.id || 'shop-1');
+  const targetShopId = currentShop?.id || (selectedShopId !== 'ALL' ? selectedShopId : '') || (dbState.shops[0]?.id || '');
 
   // Active products in currently selected shop
   const products = useMemo(() => {
     return dbState.products.filter(
-      p => p.status === 'ACTIVE' && (targetShopId === 'ALL' || p.shopId === targetShopId || !p.shopId)
+      p => p.status === 'ACTIVE' && (!targetShopId || p.shopId === targetShopId || !p.shopId)
     );
   }, [dbState.products, targetShopId]);
 
-  // Categories
-  const categories = dbState.categories;
+  // Categories for the current shop
+  const categories = useMemo(() => {
+    const all = dbState.categories || [];
+    if (targetShopId === 'ALL') return all;
+    return all.filter(c => c.shopId === targetShopId);
+  }, [dbState.categories, targetShopId]);
 
   // Filter products by search and category
   const filteredProducts = useMemo(() => {
@@ -230,7 +238,7 @@ export const NewSalePOS: React.FC = () => {
 
     const result = SalesService.createSale(
       {
-        shopId: targetShopId === 'ALL' ? (dbState.shops[0]?.id || 'shop-1') : targetShopId,
+        shopId: targetShopId === 'ALL' ? (dbState.shops[0]?.id || '') : (targetShopId || dbState.shops[0]?.id || ''),
         items: cart.map(i => ({
           productId: i.product.id,
           quantity: i.quantity,
@@ -345,19 +353,17 @@ export const NewSalePOS: React.FC = () => {
                 const isLowStock = product.currentStock > 0 && product.currentStock <= product.minStock;
 
                 return (
-                  <button
+                  <div
                     key={product.id}
                     id={`pos-product-${product.id}`}
-                    disabled={isOutOfStock}
-                    onClick={() => addToCart(product)}
-                    className={`text-left p-3 rounded-xl border transition-all flex flex-col justify-between h-32 relative overflow-hidden group ${
+                    className={`p-2.5 rounded-xl border transition-all flex flex-col justify-between h-36 relative overflow-hidden group ${
                       isOutOfStock
-                        ? 'bg-slate-900/40 border-slate-800/60 opacity-50 cursor-not-allowed'
+                        ? 'bg-slate-900/40 border-slate-800/60 opacity-50'
                         : 'bg-slate-900 border-slate-800 hover:border-blue-500/50 hover:bg-slate-850 hover:shadow-lg'
                     }`}
                   >
                     <div>
-                      <div className="flex items-start justify-between gap-1">
+                      <div className="flex items-start justify-between gap-1 mb-1.5">
                         <span className="text-[10px] font-mono text-slate-400">{product.sku}</span>
                         {isOutOfStock ? (
                           <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30">
@@ -365,7 +371,7 @@ export const NewSalePOS: React.FC = () => {
                           </span>
                         ) : isLowStock ? (
                           <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-semibold">
-                            {product.currentStock} {product.unit} left
+                            {product.currentStock} {product.unit}
                           </span>
                         ) : (
                           <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
@@ -373,20 +379,43 @@ export const NewSalePOS: React.FC = () => {
                           </span>
                         )}
                       </div>
-                      <h4 className="text-xs font-semibold text-white line-clamp-2 mt-1 group-hover:text-blue-300 transition">
-                        {product.name}
-                      </h4>
+
+                      <div className="flex items-center gap-2">
+                        <ProductThumbnail
+                          product={product}
+                          size="sm"
+                          onClick={() => {
+                            setViewingProduct(product);
+                            setIsViewerOpen(true);
+                          }}
+                        />
+                        <h4
+                          onClick={() => !isOutOfStock && addToCart(product)}
+                          className={`text-xs font-semibold text-white line-clamp-2 transition flex-1 min-w-0 ${
+                            !isOutOfStock ? 'cursor-pointer group-hover:text-blue-300' : ''
+                          }`}
+                          title={product.name}
+                        >
+                          {product.name}
+                        </h4>
+                      </div>
                     </div>
 
                     <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-800/60">
-                      <span className="text-sm font-bold text-emerald-400">
+                      <span className="text-xs font-bold text-emerald-400 font-mono">
                         {formatCurrency(product.sellingPrice, settings.currencySymbol)}
                       </span>
-                      <span className="w-6 h-6 rounded-md bg-blue-600/20 group-hover:bg-blue-600 text-blue-300 group-hover:text-white flex items-center justify-center transition">
+                      <button
+                        type="button"
+                        disabled={isOutOfStock}
+                        onClick={() => addToCart(product)}
+                        className="w-6 h-6 rounded-md bg-blue-600/20 hover:bg-blue-600 group-hover:bg-blue-600 text-blue-300 group-hover:text-white flex items-center justify-center transition disabled:opacity-30 disabled:cursor-not-allowed"
+                        title="Add to cart"
+                      >
                         <Plus className="w-3.5 h-3.5" />
-                      </span>
+                      </button>
                     </div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
@@ -446,25 +475,35 @@ export const NewSalePOS: React.FC = () => {
                   }`}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <h5 className="text-xs font-semibold text-white truncate">{item.product.name}</h5>
-                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 font-mono">
-                          {item.product.sku}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-1 flex-wrap">
-                        <span className="font-semibold text-emerald-400 font-mono">
-                          Total: {formatCurrency(item.quantity * item.unitPrice - item.discount, settings.currencySymbol)}
-                        </span>
-                        {cost > 0 && (
-                          <>
-                            <span>•</span>
-                            <span className={`text-[10px] font-medium font-mono ${itemProfit >= 0 ? 'text-slate-400' : 'text-rose-400 font-bold'}`}>
-                              Est Profit: {formatCurrency(itemProfit, settings.currencySymbol)}
-                            </span>
-                          </>
-                        )}
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <ProductThumbnail
+                        product={item.product}
+                        size="sm"
+                        onClick={() => {
+                          setViewingProduct(item.product);
+                          setIsViewerOpen(true);
+                        }}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h5 className="text-xs font-semibold text-white truncate">{item.product.name}</h5>
+                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 font-mono">
+                            {item.product.sku}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5 flex-wrap">
+                          <span className="font-semibold text-emerald-400 font-mono">
+                            Total: {formatCurrency(item.quantity * item.unitPrice - item.discount, settings.currencySymbol)}
+                          </span>
+                          {cost > 0 && (
+                            <>
+                              <span>•</span>
+                              <span className={`text-[10px] font-medium font-mono ${itemProfit >= 0 ? 'text-slate-400' : 'text-rose-400 font-bold'}`}>
+                                Est Profit: {formatCurrency(itemProfit, settings.currencySymbol)}
+                              </span>
+                            </>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -674,6 +713,14 @@ export const NewSalePOS: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Product Image Gallery / Viewer Modal */}
+      <ProductImageViewerModal
+        product={viewingProduct}
+        isOpen={isViewerOpen}
+        onClose={() => setIsViewerOpen(false)}
+        currencySymbol={settings.currencySymbol}
+      />
     </div>
   );
 };

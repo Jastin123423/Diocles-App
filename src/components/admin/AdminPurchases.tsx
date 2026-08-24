@@ -47,7 +47,7 @@ export const AdminPurchases: React.FC = () => {
     return assigned.length === 0 || assigned.includes(s.id);
   });
 
-  const activeShopId = purchaseShopId || currentShop?.id || selectedShopId || availableShops[0]?.id || 'shop-1';
+  const activeShopId = purchaseShopId || currentShop?.id || (selectedShopId !== 'ALL' ? selectedShopId : '') || availableShops[0]?.id || '';
 
   // Available products for the selected purchase shop
   const shopProducts = dbState.products.filter(p => !purchaseShopId || purchaseShopId === 'ALL' || p.shopId === purchaseShopId);
@@ -61,7 +61,7 @@ export const AdminPurchases: React.FC = () => {
   );
 
   const openNewPurchaseModal = () => {
-    const targetShop = currentShop?.id || (selectedShopId !== 'ALL' ? selectedShopId : availableShops[0]?.id) || 'shop-1';
+    const targetShop = currentShop?.id || (selectedShopId !== 'ALL' ? selectedShopId : availableShops[0]?.id) || '';
     setPurchaseShopId(targetShop);
     setSupplierName('');
     setInvoiceNumber('');
@@ -134,7 +134,7 @@ export const AdminPurchases: React.FC = () => {
 
     const res = PurchaseService.createPurchase(
       {
-        shopId: purchaseShopId || availableShops[0]?.id || 'shop-1',
+        shopId: purchaseShopId || availableShops[0]?.id || '',
         supplierName: supplierName.trim(),
         invoiceNumber: invoiceNumber.trim() || undefined,
         items,

@@ -399,12 +399,25 @@ export const AdminShops: React.FC = () => {
       </div>
 
       {shops.length === 0 && (
-        <div className="p-12 text-center bg-slate-900/40 rounded-xl border border-slate-800">
-          <Store className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-          <h4 className="text-sm font-semibold text-slate-300">No Shops Found</h4>
-          <p className="text-xs text-slate-500 mt-1">
-            {search ? 'No business units match your query.' : 'Create your first shop or business unit to get started.'}
+        <div className="p-12 text-center bg-slate-900/40 rounded-xl border border-slate-800 flex flex-col items-center justify-center">
+          <div className="w-16 h-16 rounded-2xl bg-blue-950/40 border border-blue-800/50 flex items-center justify-center text-blue-400 mb-4 shadow-lg">
+            <Store className="w-8 h-8" />
+          </div>
+          <h4 className="text-base font-bold text-white mb-1">No Shops Created Yet</h4>
+          <p className="text-xs text-slate-400 max-w-md mb-6 leading-relaxed">
+            {search
+              ? 'No business units match your query.'
+              : 'Your workspace has a clean slate. Create your first shop, branch, or retail unit to begin adding inventory, sellers, and processing sales.'}
           </p>
+          {!search && (
+            <button
+              onClick={handleOpenCreate}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-lg transition"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Create First Shop</span>
+            </button>
+          )}
         </div>
       )}
 

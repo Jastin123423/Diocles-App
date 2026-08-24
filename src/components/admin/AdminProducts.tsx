@@ -19,8 +19,11 @@ import {
 import { useApp } from '../../context/AppContext';
 import { ProductService } from '../../services/productService';
 import { CategoryService } from '../../services/categoryService';
-import { Product, Category } from '../../types';
+import { Product, Category, ProductImage } from '../../types';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
+import { ProductThumbnail } from '../common/ProductThumbnail';
+import { ProductImageViewerModal } from '../common/ProductImageViewerModal';
+import { ProductImageUpload } from '../common/ProductImageUpload';
 
 export const AdminProducts: React.FC = () => {
   const { currentUser, dbState, addToast, selectedShopId } = useApp();
@@ -29,6 +32,7 @@ export const AdminProducts: React.FC = () => {
   const [categoryFilter, setCategoryFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [shopFilter, setShopFilter] = useState('ALL');
+  const [categoryShopFilter, setCategoryShopFilter] = useState('ALL');
 
   // Add / Edit Product Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -45,11 +49,17 @@ export const AdminProducts: React.FC = () => {
   const [currentStock, setCurrentStock] = useState('0');
   const [minStock, setMinStock] = useState('5');
   const [unit, setUnit] = useState('pcs');
+  const [productImages, setProductImages] = useState<ProductImage[]>([]);
   const [formError, setFormError] = useState('');
+
+  // Image Viewer Modal State
+  const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
 
   // Category Modal State
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [catShopIdInput, setCatShopIdInput] = useState('');
   const [catNameInput, setCatNameInput] = useState('');
   const [catColorInput, setCatColorInput] = useState('#3b82f6');
   const [catModalError, setCatModalError] = useState('');
@@ -60,6 +70,11 @@ export const AdminProducts: React.FC = () => {
   const categories = dbState.categories || [];
   const shops = dbState.shops || [];
 
+  // Filtered categories for product filtering dropdown based on selected shopFilter
+  const availableFilterCategories = shopFilter === 'ALL'
+    ? categories
+    : categories.filter(c => c.shopId === shopFilter);
+
   const products = ProductService.getProducts({
     shopId: shopFilter === 'ALL' ? undefined : shopFilter,
     categoryId: categoryFilter === 'ALL' ? undefined : categoryFilter,
@@ -69,25 +84,27 @@ export const AdminProducts: React.FC = () => {
 
   const openAddModal = () => {
     setEditingProduct(null);
-    setProductShopId(selectedShopId && selectedShopId !== 'ALL' ? selectedShopId : shops[0]?.id || 'shop-1');
+    const initialShopId = selectedShopId && selectedShopId !== 'ALL' ? selectedShopId : shops[0]?.id || '';
+    setProductShopId(initialShopId);
     setName('');
     setSku('');
     setBarcode('');
-    const hardwareCat = categories.find(c => c.name.toLowerCase() === 'hardware' && c.status !== 'INACTIVE');
-    const firstActiveCat = categories.find(c => c.status !== 'INACTIVE');
-    setCategoryId(hardwareCat?.id || firstActiveCat?.id || categories[0]?.id || 'cat-hardware');
+    const shopCats = categories.filter(c => c.shopId === initialShopId && c.status !== 'INACTIVE');
+    setCategoryId(shopCats[0]?.id || categories.find(c => c.status !== 'INACTIVE')?.id || categories[0]?.id || '');
     setPurchasePrice('');
     setSellingPrice('');
     setCurrentStock('0');
     setMinStock('5');
     setUnit('pcs');
+    setProductImages([]);
     setFormError('');
     setIsModalOpen(true);
   };
 
   const openEditModal = (p: Product) => {
     setEditingProduct(p);
-    setProductShopId(p.shopId || shops[0]?.id || 'shop-1');
+    const pShopId = p.shopId || shops[0]?.id || '';
+    setProductShopId(pShopId);
     setName(p.name);
     setSku(p.sku);
     setBarcode(p.barcode);
@@ -97,8 +114,17 @@ export const AdminProducts: React.FC = () => {
     setCurrentStock(p.currentStock.toString());
     setMinStock(p.minStock.toString());
     setUnit(p.unit);
+    setProductImages(p.images || []);
     setFormError('');
     setIsModalOpen(true);
+  };
+
+  const handleProductShopChange = (newShopId: string) => {
+    setProductShopId(newShopId);
+    const shopCats = categories.filter(c => c.shopId === newShopId && c.status !== 'INACTIVE');
+    if (shopCats.length > 0 && !shopCats.some(c => c.id === categoryId)) {
+      setCategoryId(shopCats[0].id);
+    }
   };
 
   const handleSaveProduct = (e: React.FormEvent) => {
@@ -137,6 +163,7 @@ export const AdminProducts: React.FC = () => {
           currentStock: parseInt(currentStock, 10) || 0,
           minStock: parseInt(minStock, 10) || 5,
           unit,
+          images: productImages,
         },
         currentUser
       );
@@ -164,6 +191,7 @@ export const AdminProducts: React.FC = () => {
           currentStock: parseInt(currentStock, 10) || 0,
           minStock: parseInt(minStock, 10) || 5,
           unit,
+          images: productImages,
         },
         currentUser
       );
@@ -194,8 +222,10 @@ export const AdminProducts: React.FC = () => {
   };
 
   // Category Actions
-  const openAddCategoryModal = () => {
+  const openAddCategoryModal = (targetShopId?: string) => {
     setEditingCategory(null);
+    const defaultShop = targetShopId || (selectedShopId && selectedShopId !== 'ALL' ? selectedShopId : shops[0]?.id || '');
+    setCatShopIdInput(defaultShop);
     setCatNameInput('');
     setCatColorInput('#3b82f6');
     setCatModalError('');
@@ -204,6 +234,7 @@ export const AdminProducts: React.FC = () => {
 
   const openEditCategoryModal = (cat: Category) => {
     setEditingCategory(cat);
+    setCatShopIdInput(cat.shopId || shops[0]?.id || '');
     setCatNameInput(cat.name);
     setCatColorInput(cat.color || '#3b82f6');
     setCatModalError('');
@@ -219,17 +250,22 @@ export const AdminProducts: React.FC = () => {
       return;
     }
 
+    if (!catShopIdInput) {
+      setCatModalError('Please select a specific shop for this category.');
+      return;
+    }
+
     if (editingCategory) {
       const res = CategoryService.updateCategory(
         editingCategory.id,
-        { name: catNameInput.trim(), color: catColorInput },
+        { name: catNameInput.trim(), shopId: catShopIdInput, color: catColorInput },
         currentUser
       );
       if (res.success) {
         addToast({
           type: 'success',
           title: 'Category Updated',
-          description: `Category '${catNameInput}' updated.`,
+          description: `Category '${catNameInput}' updated for ${shops.find(s => s.id === catShopIdInput)?.name || 'shop'}.`,
         });
         setIsCategoryModalOpen(false);
       } else {
@@ -237,14 +273,14 @@ export const AdminProducts: React.FC = () => {
       }
     } else {
       const res = CategoryService.createCategory(
-        { name: catNameInput.trim(), color: catColorInput },
+        { name: catNameInput.trim(), shopId: catShopIdInput, color: catColorInput },
         currentUser
       );
       if (res.success) {
         addToast({
           type: 'success',
           title: 'Category Created',
-          description: `New category '${catNameInput}' added.`,
+          description: `New category '${catNameInput}' created for ${shops.find(s => s.id === catShopIdInput)?.name || 'shop'}.`,
         });
         setIsCategoryModalOpen(false);
       } else {
@@ -365,11 +401,14 @@ export const AdminProducts: React.FC = () => {
                 className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
               >
                 <option value="ALL">All Categories</option>
-                {categories.map(c => (
-                  <option key={c.id} value={c.id}>
-                    {c.name} {c.status === 'INACTIVE' ? '(Inactive)' : ''}
-                  </option>
-                ))}
+                {availableFilterCategories.map(c => {
+                  const s = shops.find(shop => shop.id === c.shopId);
+                  return (
+                    <option key={c.id} value={c.id}>
+                      {c.name} {shopFilter === 'ALL' && s ? `(${s.name})` : ''} {c.status === 'INACTIVE' ? '(Inactive)' : ''}
+                    </option>
+                  );
+                })}
               </select>
 
               <select
@@ -436,12 +475,24 @@ export const AdminProducts: React.FC = () => {
                           }`}
                         >
                           <td className="py-3.5 px-4 font-semibold text-white">
-                            <div>{product.name}</div>
-                            {product.status === 'INACTIVE' && (
-                              <span className="text-[10px] font-normal text-rose-400 bg-rose-500/10 px-1.5 py-0.2 rounded border border-rose-500/20">
-                                Deactivated / Hidden from POS
-                              </span>
-                            )}
+                            <div className="flex items-center gap-3">
+                              <ProductThumbnail
+                                product={product}
+                                size="md"
+                                onClick={() => {
+                                  setViewingProduct(product);
+                                  setIsViewerOpen(true);
+                                }}
+                              />
+                              <div className="min-w-0">
+                                <div className="truncate font-semibold">{product.name}</div>
+                                {product.status === 'INACTIVE' && (
+                                  <span className="text-[10px] font-normal text-rose-400 bg-rose-500/10 px-1.5 py-0.2 rounded border border-rose-500/20">
+                                    Deactivated / Hidden from POS
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           </td>
                           <td className="py-3.5 px-4 text-slate-300">
                             <span className="px-2 py-0.5 rounded bg-blue-950/70 text-blue-300 border border-blue-800/50 text-[10px] font-semibold">
@@ -523,91 +574,195 @@ export const AdminProducts: React.FC = () => {
 
       {/* Category Management Tab */}
       {activeSubTab === 'categories' && (
-        <div className="space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex items-center justify-between">
+        <div className="space-y-6">
+          {/* Header & Filter Bar */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h3 className="text-sm font-bold text-white">Item Classification Categories</h3>
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <FolderTree className="w-4 h-4 text-emerald-400" />
+                <span>Shop-Specific Categories</span>
+              </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Categories help organize products for inventory, reporting, and quick filtering during sales.
+                Every category is assigned to a specific shop to keep products neatly classified and isolated.
               </p>
             </div>
-            <button
-              onClick={openAddCategoryModal}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add Category</span>
-            </button>
-          </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-            {categories.map(cat => {
-              const productCount = dbState.products.filter(p => p.categoryId === cat.id).length;
-              const isHardware = cat.name.toLowerCase() === 'hardware';
-              const isActive = cat.status !== 'INACTIVE';
-
-              return (
-                <div
-                  key={cat.id}
-                  className={`bg-slate-900 border rounded-xl p-4 flex flex-col justify-between space-y-3 transition ${
-                    isActive ? 'border-slate-800 hover:border-slate-700' : 'border-slate-800/60 opacity-60 bg-slate-950/50'
+            <div className="flex items-center gap-2.5 flex-wrap">
+              {/* Filter by Shop Chips */}
+              <div className="flex items-center gap-1.5 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs overflow-x-auto">
+                <button
+                  onClick={() => setCategoryShopFilter('ALL')}
+                  className={`px-3 py-1 rounded-md font-medium transition ${
+                    categoryShopFilter === 'ALL'
+                      ? 'bg-blue-600 text-white'
+                      : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-center gap-2.5">
-                      <div
-                        className="w-8 h-8 rounded-lg flex items-center justify-center text-white font-bold text-xs shadow"
-                        style={{ backgroundColor: cat.color || '#3b82f6' }}
-                      >
-                        <Tag className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="text-sm font-bold text-white">{cat.name}</h4>
-                          {isHardware && (
-                            <span className="text-[10px] px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300 font-medium">
-                              Default
-                            </span>
-                          )}
+                  All Shops ({categories.length})
+                </button>
+                {shops.map(s => {
+                  const count = categories.filter(c => c.shopId === s.id).length;
+                  return (
+                    <button
+                      key={s.id}
+                      onClick={() => setCategoryShopFilter(s.id)}
+                      className={`px-3 py-1 rounded-md font-medium whitespace-nowrap transition ${
+                        categoryShopFilter === s.id
+                          ? 'bg-blue-600 text-white'
+                          : 'text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      {s.name} ({count})
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                onClick={() => openAddCategoryModal(categoryShopFilter === 'ALL' ? undefined : categoryShopFilter)}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Category</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Grouped by Shop Sections */}
+          <div className="space-y-6">
+            {shops
+              .filter(shop => categoryShopFilter === 'ALL' || categoryShopFilter === shop.id)
+              .map(shop => {
+                const shopCats = categories.filter(c => c.shopId === shop.id);
+                const totalShopProducts = dbState.products.filter(p => p.shopId === shop.id).length;
+
+                // Format friendly header title like "Clothes Shop Categories" or "Hardware Categories"
+                const cleanShopName = shop.name.trim();
+                const shopHeaderTitle = cleanShopName.toLowerCase().endsWith('categories')
+                  ? cleanShopName
+                  : cleanShopName.toLowerCase().endsWith('shop')
+                  ? `${cleanShopName} Categories`
+                  : `${cleanShopName} Categories`;
+
+                return (
+                  <div key={shop.id} className="bg-slate-900/90 border border-slate-800/90 rounded-2xl p-5 shadow-lg space-y-4">
+                    {/* Shop Header Banner */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center font-bold">
+                          <Store className="w-5 h-5" />
                         </div>
-                        <p className="text-[11px] text-slate-400 mt-0.5">
-                          {productCount} {productCount === 1 ? 'Product' : 'Products'} assigned
-                        </p>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="text-base font-bold text-white">
+                              {shopHeaderTitle}
+                            </h4>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                              {shop.code || 'UNIT'}
+                            </span>
+                            {shop.status === 'INACTIVE' && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/15 text-rose-300 border border-rose-500/20">
+                                Shop Inactive
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            {shopCats.length} {shopCats.length === 1 ? 'Category' : 'Categories'} • {totalShopProducts} Products in this shop
+                          </p>
+                        </div>
                       </div>
+
+                      <button
+                        onClick={() => openAddCategoryModal(shop.id)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-400 hover:text-emerald-300 font-medium text-xs border border-slate-700/60 transition"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add Category to {shop.name}</span>
+                      </button>
                     </div>
 
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        isActive
-                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'
-                          : 'bg-rose-500/15 text-rose-400 border border-rose-500/20'
-                      }`}
-                    >
-                      {isActive ? 'Active' : 'Inactive'}
-                    </span>
-                  </div>
+                    {/* Category Cards under this Shop */}
+                    {shopCats.length === 0 ? (
+                      <div className="p-8 text-center bg-slate-950/40 rounded-xl border border-dashed border-slate-800 text-slate-500">
+                        <Tag className="w-8 h-8 mx-auto mb-2 opacity-40 text-slate-400" />
+                        <p className="text-sm font-medium text-slate-300">No categories created for {shop.name} yet.</p>
+                        <p className="text-xs text-slate-500 mt-1">Assign categories to this shop so sellers can organize inventory accurately.</p>
+                        <button
+                          onClick={() => openAddCategoryModal(shop.id)}
+                          className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>Create First Category for {shop.name}</span>
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3.5">
+                        {shopCats.map(cat => {
+                          const productCount = dbState.products.filter(p => p.categoryId === cat.id && p.shopId === shop.id).length;
+                          const isActive = cat.status !== 'INACTIVE';
 
-                  <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-800">
-                    <button
-                      onClick={() => openEditCategoryModal(cat)}
-                      className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleToggleCategoryStatus(cat)}
-                      className={`px-2.5 py-1 rounded text-xs font-medium transition ${
-                        isActive
-                          ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-300'
-                          : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300'
-                      }`}
-                    >
-                      {isActive ? 'Deactivate' : 'Activate'}
-                    </button>
+                          return (
+                            <div
+                              key={cat.id}
+                              className={`bg-slate-950/70 border rounded-xl p-3.5 flex flex-col justify-between space-y-3 transition ${
+                                isActive ? 'border-slate-800 hover:border-slate-700' : 'border-slate-800/60 opacity-60 bg-slate-950/40'
+                              }`}
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <div
+                                    className="w-7 h-7 rounded-lg flex items-center justify-center text-white font-bold text-xs shrink-0 shadow"
+                                    style={{ backgroundColor: cat.color || '#3b82f6' }}
+                                  >
+                                    <Tag className="w-3.5 h-3.5" />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <h5 className="text-xs font-bold text-white truncate" title={cat.name}>
+                                      {cat.name}
+                                    </h5>
+                                    <p className="text-[11px] text-slate-400 mt-0.5">
+                                      {productCount} {productCount === 1 ? 'Product' : 'Products'}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <span
+                                  className={`px-1.5 py-0.2 text-[9px] font-bold rounded-full shrink-0 ${
+                                    isActive
+                                      ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'
+                                      : 'bg-rose-500/15 text-rose-400 border border-rose-500/20'
+                                  }`}
+                                >
+                                  {isActive ? 'Active' : 'Inactive'}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center justify-end gap-1.5 pt-2.5 border-t border-slate-800/80">
+                                <button
+                                  onClick={() => openEditCategoryModal(cat)}
+                                  className="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium transition"
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  onClick={() => handleToggleCategoryStatus(cat)}
+                                  className={`px-2 py-1 rounded text-xs font-medium transition ${
+                                    isActive
+                                      ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-300'
+                                      : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300'
+                                  }`}
+                                >
+                                  {isActive ? 'Deactivate' : 'Activate'}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
           </div>
         </div>
       )}
@@ -643,7 +798,7 @@ export const AdminProducts: React.FC = () => {
                 <label className="block text-slate-300 font-medium mb-1">Assigned Shop / Unit *</label>
                 <select
                   value={productShopId}
-                  onChange={e => setProductShopId(e.target.value)}
+                  onChange={e => handleProductShopChange(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
                   {shops.map(s => (
@@ -668,20 +823,35 @@ export const AdminProducts: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Category *</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-slate-300 font-medium">Category *</label>
+                    <button
+                      type="button"
+                      onClick={() => openAddCategoryModal(productShopId)}
+                      className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-0.5"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>New</span>
+                    </button>
+                  </div>
                   <select
                     value={categoryId}
                     onChange={e => setCategoryId(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
                     {categories
-                      .filter(c => c.status !== 'INACTIVE' || c.id === categoryId)
+                      .filter(c => c.shopId === productShopId && (c.status !== 'INACTIVE' || c.id === categoryId))
                       .map(c => (
                         <option key={c.id} value={c.id}>
                           {c.name} {c.status === 'INACTIVE' ? '(Inactive)' : ''}
                         </option>
                       ))}
                   </select>
+                  {categories.filter(c => c.shopId === productShopId).length === 0 && (
+                    <p className="text-[10px] text-amber-400 mt-1">
+                      No categories exist for this shop yet. Click "+ New" above.
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -792,6 +962,15 @@ export const AdminProducts: React.FC = () => {
                 </div>
               </div>
 
+              {/* Product Images (Optional - up to 3 images) */}
+              <div className="pt-2 border-t border-slate-800/80">
+                <ProductImageUpload
+                  images={productImages}
+                  onChange={setProductImages}
+                  productId={editingProduct?.id}
+                />
+              </div>
+
               <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
                 <button
                   type="button"
@@ -840,13 +1019,33 @@ export const AdminProducts: React.FC = () => {
 
             <form onSubmit={handleSaveCategory} className="space-y-4 text-xs">
               <div>
+                <label className="block text-slate-300 font-medium mb-1">Assign to Shop / Unit *</label>
+                <select
+                  value={catShopIdInput}
+                  onChange={e => setCatShopIdInput(e.target.value)}
+                  required
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                >
+                  <option value="" disabled>Select target shop...</option>
+                  {shops.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.code || 'UNIT'})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Categories are strictly assigned to this specific shop to keep items neatly organized.
+                </p>
+              </div>
+
+              <div>
                 <label className="block text-slate-300 font-medium mb-1">Category Name *</label>
                 <input
                   type="text"
                   required
                   value={catNameInput}
                   onChange={e => setCatNameInput(e.target.value)}
-                  placeholder="e.g. Electrical, Plumbing, Power Tools..."
+                  placeholder="e.g. Shirts, Pants, Dresses (for Clothes Shop) or Plumbing, Tools (for Hardware)..."
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
                 />
               </div>
@@ -889,6 +1088,13 @@ export const AdminProducts: React.FC = () => {
           </div>
         </div>
       )}
+      {/* Product Image Gallery / Viewer Modal */}
+      <ProductImageViewerModal
+        product={viewingProduct}
+        isOpen={isViewerOpen}
+        onClose={() => setIsViewerOpen(false)}
+        currencySymbol={settings.currencySymbol}
+      />
     </div>
   );
 };

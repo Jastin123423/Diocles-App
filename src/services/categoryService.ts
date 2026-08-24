@@ -1,18 +1,58 @@
 import { db } from '../db/storage';
-import { Category, User } from '../types';
+import { Category, Shop, User } from '../types';
 import { generateUUID } from '../utils/crypto';
 
+export interface GetCategoriesOptions {
+  shopId?: string;
+  activeOnly?: boolean;
+}
+
+export interface ShopCategoryGroup {
+  shop: Shop;
+  categories: Category[];
+}
+
 export class CategoryService {
-  public static getCategories(activeOnly = false): Category[] {
+  /**
+   * Retrieve categories with optional shop filtering and active-only filtering
+   */
+  public static getCategories(optionsOrActiveOnly?: GetCategoriesOptions | boolean): Category[] {
     const cats = db.getCategories();
-    if (activeOnly) {
-      return cats.filter(c => c.status !== 'INACTIVE');
+    let shopId: string | undefined;
+    let activeOnly = false;
+
+    if (typeof optionsOrActiveOnly === 'boolean') {
+      activeOnly = optionsOrActiveOnly;
+    } else if (optionsOrActiveOnly) {
+      shopId = optionsOrActiveOnly.shopId;
+      activeOnly = !!optionsOrActiveOnly.activeOnly;
     }
-    return cats;
+
+    return cats.filter(c => {
+      if (activeOnly && c.status === 'INACTIVE') return false;
+      if (shopId && shopId !== 'ALL' && c.shopId !== shopId) return false;
+      return true;
+    });
   }
 
+  /**
+   * Retrieve categories grouped by shop for display in admin panels
+   */
+  public static getCategoriesGroupedByShop(activeOnly = false): ShopCategoryGroup[] {
+    const shops = db.getShops();
+    const categories = this.getCategories({ activeOnly });
+
+    return shops.map(shop => ({
+      shop,
+      categories: categories.filter(c => c.shopId === shop.id),
+    }));
+  }
+
+  /**
+   * Create a new category assigned strictly to a specific shop
+   */
   public static createCategory(
-    data: { name: string; icon?: string; color?: string },
+    data: { name: string; shopId: string; icon?: string; color?: string },
     currentUser: User
   ): { success: boolean; category?: Category; error?: string } {
     if (currentUser.role !== 'ADMIN') {
@@ -23,13 +63,31 @@ export class CategoryService {
       return { success: false, error: 'Category name is required.' };
     }
 
+    if (!data.shopId || !data.shopId.trim()) {
+      return { success: false, error: 'Every category must be assigned to a specific shop.' };
+    }
+
+    const shops = db.getShops();
+    const targetShop = shops.find(s => s.id === data.shopId.trim());
+    if (!targetShop) {
+      return { success: false, error: 'Selected shop does not exist.' };
+    }
+
     const categories = db.getCategories();
-    if (categories.some(c => c.name.toLowerCase() === data.name.trim().toLowerCase())) {
-      return { success: false, error: 'A category with this name already exists.' };
+    const duplicateInShop = categories.some(
+      c => c.shopId === targetShop.id && c.name.toLowerCase() === data.name.trim().toLowerCase()
+    );
+
+    if (duplicateInShop) {
+      return {
+        success: false,
+        error: `A category named '${data.name.trim()}' already exists in ${targetShop.name}.`,
+      };
     }
 
     const newCategory: Category = {
       id: `cat-${generateUUID().slice(0, 8)}`,
+      shopId: targetShop.id,
       name: data.name.trim(),
       icon: data.icon || 'Package',
       color: data.color || '#3b82f6',
@@ -45,18 +103,22 @@ export class CategoryService {
       userId: currentUser.id,
       userName: currentUser.name,
       action: 'CREATE_CATEGORY',
-      details: `Created category '${newCategory.name}'`,
+      details: `Created category '${newCategory.name}' for shop '${targetShop.name}' (${targetShop.code || 'UNIT'})`,
       entityType: 'SETTINGS',
       entityId: newCategory.id,
+      shopId: targetShop.id,
       timestamp: new Date().toISOString(),
     });
 
     return { success: true, category: newCategory };
   }
 
+  /**
+   * Update an existing category
+   */
   public static updateCategory(
     id: string,
-    data: { name?: string; icon?: string; color?: string; status?: 'ACTIVE' | 'INACTIVE' },
+    data: { name?: string; shopId?: string; icon?: string; color?: string; status?: 'ACTIVE' | 'INACTIVE' },
     currentUser: User
   ): { success: boolean; category?: Category; error?: string } {
     if (currentUser.role !== 'ADMIN') {
@@ -69,33 +131,50 @@ export class CategoryService {
       return { success: false, error: 'Category not found.' };
     }
 
-    if (data.name && data.name.trim()) {
-      const duplicate = categories.some(
-        c => c.id !== id && c.name.toLowerCase() === data.name!.trim().toLowerCase()
-      );
-      if (duplicate) {
-        return { success: false, error: 'Another category with this name already exists.' };
-      }
+    const current = categories[index];
+    const targetShopId = data.shopId || current.shopId;
+    const targetName = data.name !== undefined ? data.name.trim() : current.name;
+
+    if (!targetName) {
+      return { success: false, error: 'Category name cannot be empty.' };
+    }
+
+    const duplicate = categories.some(
+      c => c.id !== id && c.shopId === targetShopId && c.name.toLowerCase() === targetName.toLowerCase()
+    );
+
+    if (duplicate) {
+      const shops = db.getShops();
+      const shop = shops.find(s => s.id === targetShopId);
+      return {
+        success: false,
+        error: `Another category named '${targetName}' already exists in ${shop ? shop.name : 'this shop'}.`,
+      };
     }
 
     const updatedCategory: Category = {
-      ...categories[index],
+      ...current,
       ...data,
-      name: data.name ? data.name.trim() : categories[index].name,
+      shopId: targetShopId,
+      name: targetName,
       updatedAt: new Date().toISOString(),
     };
 
     categories[index] = updatedCategory;
     db.saveCategories([...categories]);
 
+    const shops = db.getShops();
+    const shop = shops.find(s => s.id === updatedCategory.shopId);
+
     db.addAuditLog({
       id: generateUUID(),
       userId: currentUser.id,
       userName: currentUser.name,
       action: 'UPDATE_CATEGORY',
-      details: `Updated category '${updatedCategory.name}' (Status: ${updatedCategory.status})`,
+      details: `Updated category '${updatedCategory.name}' for shop '${shop?.name || updatedCategory.shopId}' (Status: ${updatedCategory.status})`,
       entityType: 'SETTINGS',
       entityId: updatedCategory.id,
+      shopId: updatedCategory.shopId,
       timestamp: new Date().toISOString(),
     });
 
@@ -115,3 +194,4 @@ export class CategoryService {
     return this.updateCategory(id, { status: newStatus }, currentUser);
   }
 }
+

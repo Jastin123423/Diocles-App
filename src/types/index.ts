@@ -32,6 +32,7 @@ export interface Shop {
 
 export interface Category {
   id: string;
+  shopId: string; // Specific shop this category belongs to
   name: string;
   icon?: string;
   color?: string;
@@ -41,6 +42,24 @@ export interface Category {
 }
 
 export type ProductStatus = 'ACTIVE' | 'INACTIVE';
+
+export interface ProductImage {
+  imageId: string;
+  productId?: string;
+  imageOrder: number; // 0, 1, 2 (0 = Main Image)
+  version: number; // Version number for delta-sync (starts at 1)
+  dataUrl: string; // Full compressed base64 data for gallery viewer
+  thumbnailUrl?: string; // Ultra-compact thumbnail base64 for fast lists
+  filename?: string;
+  mimeType: string;
+  fileSize: number;
+  width?: number;
+  height?: number;
+  hash?: string; // Stable Checksum / Hash for comparing local vs server version
+  syncStatus?: 'LOCAL_ONLY' | 'SYNCED' | 'MODIFIED_LOCALLY';
+  createdAt: string;
+  updatedAt: string;
+}
 
 export interface Product {
   id: string;
@@ -56,7 +75,8 @@ export interface Product {
   minStock: number;
   unit: string; // e.g., 'pcs', 'kg', 'box', 'pack', 'liter'
   status: ProductStatus;
-  imageUrl?: string;
+  imageUrl?: string; // Main image URL/dataUrl (for backward compatibility)
+  images?: ProductImage[]; // Optional array of up to 3 ProductImages
   createdAt: string;
   updatedAt: string;
 }
@@ -208,6 +228,7 @@ export interface AuditLog {
   details: string;
   entityType: 'PRODUCT' | 'SALE' | 'PURCHASE' | 'EXPENSE' | 'SELLER' | 'INVENTORY' | 'SETTINGS' | 'AUTH' | 'BACKUP' | 'SHOP' | 'IMPORT';
   entityId?: string;
+  shopId?: string;
   timestamp: string;
   performedByName?: string;
   createdAt?: string;

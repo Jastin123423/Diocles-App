@@ -5,17 +5,15 @@ import {
   User as UserIcon,
   KeyRound,
   ArrowRight,
-  Sparkles,
   Lock,
   Boxes,
-  HelpCircle,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { AuthService } from '../../services/authService';
 import { UserRole } from '../../types';
 
 export const LoginView: React.FC = () => {
-  const { login, addToast, dbState } = useApp();
+  const { login, dbState } = useApp();
   const [activePortal, setActivePortal] = useState<UserRole>('SELLER');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -51,13 +49,6 @@ export const LoginView: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  };
-
-  const handleQuickLogin = (uName: string, pass: string, role: UserRole) => {
-    setActivePortal(role);
-    setUsername(uName);
-    setPassword(pass);
-    setErrorMsg('');
   };
 
   return (
@@ -149,7 +140,7 @@ export const LoginView: React.FC = () => {
                     type="text"
                     value={username}
                     onChange={e => setUsername(e.target.value)}
-                    placeholder={activePortal === 'ADMIN' ? 'Admin' : 'john or sarah'}
+                    placeholder={activePortal === 'ADMIN' ? 'Enter admin username' : 'Enter seller username'}
                     autoFocus
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
                   />
@@ -193,62 +184,13 @@ export const LoginView: React.FC = () => {
                 )}
               </button>
             </form>
-
-            {/* Quick Demo Credentials Panel for testing */}
-            <div className="mt-6 pt-5 border-t border-slate-800/80">
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-blue-400" />
-                  Quick Demo Accounts
-                </span>
-                <span className="text-[10px] text-slate-500">Click to autofill</span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <button
-                  type="button"
-                  onClick={() => handleQuickLogin('Admin', '52775277', 'ADMIN')}
-                  className="p-2 rounded-lg bg-slate-950/80 hover:bg-slate-800 border border-slate-800 text-left transition flex flex-col"
-                >
-                  <span className="font-semibold text-amber-300">Admin Account</span>
-                  <span className="text-[10px] text-slate-400">Admin / 52775277</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleQuickLogin('john', 'seller123', 'SELLER')}
-                  className="p-2 rounded-lg bg-slate-950/80 hover:bg-slate-800 border border-slate-800 text-left transition flex flex-col"
-                >
-                  <span className="font-semibold text-blue-300">Seller: John Miller</span>
-                  <span className="text-[10px] text-slate-400">john / seller123</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleQuickLogin('sarah', 'seller123', 'SELLER')}
-                  className="p-2 rounded-lg bg-slate-950/80 hover:bg-slate-800 border border-slate-800 text-left transition flex flex-col"
-                >
-                  <span className="font-semibold text-purple-300">Seller: Sarah Jenkins</span>
-                  <span className="text-[10px] text-slate-400">sarah / seller123</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => handleQuickLogin('alex', 'seller123', 'SELLER')}
-                  className="p-2 rounded-lg bg-slate-950/80 hover:bg-slate-800 border border-slate-800 text-left transition flex flex-col opacity-75"
-                >
-                  <span className="font-semibold text-rose-400">Inactive: Alex (Former)</span>
-                  <span className="text-[10px] text-slate-400">alex / seller123</span>
-                </button>
-              </div>
-            </div>
           </div>
         </div>
       </div>
 
       {/* Footer Info */}
       <footer className="px-6 py-3 border-t border-slate-900 text-center text-xs text-slate-400">
-        Local SQLite-compatible Storage • Zero Internet Requirement • Windows Commercial Standard
+        Local SQLite-compatible Storage • Zero Internet Requirement • Multi-Shop Ready
       </footer>
     </div>
   );

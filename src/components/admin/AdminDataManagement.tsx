@@ -53,6 +53,8 @@ export const AdminDataManagement: React.FC = () => {
 
   // Sync state
   const [isSyncing, setIsSyncing] = useState(false);
+  const [showWipeConfirm, setShowWipeConfirm] = useState(false);
+  const [isWiping, setIsWiping] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
@@ -192,6 +194,29 @@ export const AdminDataManagement: React.FC = () => {
       }
     };
     reader.readAsText(file);
+  };
+
+  // Handle Wipe All Demo/Transactional Data
+  const handleWipeAllData = () => {
+    setIsWiping(true);
+    const res = BackupService.wipeAllData(currentUser);
+    setIsWiping(false);
+    setShowWipeConfirm(false);
+
+    if (res.success) {
+      addToast({
+        type: 'success',
+        title: 'All Demo & Business Data Deleted',
+        description: 'The database has been cleanly purged of all products, sales, expenses, debts, and movements.',
+      });
+      window.location.reload();
+    } else {
+      addToast({
+        type: 'error',
+        title: 'Action Failed',
+        description: res.error || 'Failed to wipe data.',
+      });
+    }
   };
 
   // QuickBooks Import
@@ -719,49 +744,136 @@ export const AdminDataManagement: React.FC = () => {
         </div>
       )}
 
-      {/* SUB-TAB 2: JSON BACKUP / RESTORE */}
+      {/* SUB-TAB 2: JSON BACKUP / RESTORE & CLEAN SLATE */}
       {activeSubTab === 'backup' && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-            <div className="flex items-center gap-2 mb-3 text-blue-400">
-              <Download className="w-5 h-5" />
-              <h3 className="font-bold text-sm text-white">Export Full JSON Database Backup</h3>
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+              <div className="flex items-center gap-2 mb-3 text-blue-400">
+                <Download className="w-5 h-5" />
+                <h3 className="font-bold text-sm text-white">Export Full JSON Database Backup</h3>
+              </div>
+              <p className="text-xs text-slate-400 mb-4 leading-relaxed">
+                Export all multi-shop data, products, inventory movements, sales, purchases, expenses, and sellers into a portable .json backup file.
+              </p>
+              <button
+                onClick={handleExportBackup}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition"
+              >
+                <Download className="w-4 h-4" />
+                <span>Download .json Backup</span>
+              </button>
             </div>
-            <p className="text-xs text-slate-400 mb-4 leading-relaxed">
-              Export all multi-shop data, products, inventory movements, sales, purchases, expenses, and sellers into a portable .json backup file.
-            </p>
-            <button
-              onClick={handleExportBackup}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs transition"
-            >
-              <Download className="w-4 h-4" />
-              <span>Download .json Backup</span>
-            </button>
+
+            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
+              <div className="flex items-center gap-2 mb-3 text-emerald-400">
+                <Upload className="w-5 h-5" />
+                <h3 className="font-bold text-sm text-white">Restore Database Snapshot</h3>
+              </div>
+              <p className="text-xs text-slate-400 mb-4 leading-relaxed">
+                Restore the entire local database from a previously exported Diocres backup file.
+              </p>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json"
+                onChange={handleRestoreFile}
+                className="hidden"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition"
+              >
+                <Upload className="w-4 h-4" />
+                <span>Select .json Backup File</span>
+              </button>
+            </div>
           </div>
 
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
-            <div className="flex items-center gap-2 mb-3 text-emerald-400">
-              <Upload className="w-5 h-5" />
-              <h3 className="font-bold text-sm text-white">Restore Database Snapshot</h3>
+          {/* Cloudflare Clean Slate / Purge Data Card */}
+          <div className="bg-slate-900/90 border border-rose-900/40 rounded-2xl p-6 relative overflow-hidden">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2 text-rose-400 mb-1.5">
+                  <AlertTriangle className="w-5 h-5" />
+                  <h3 className="font-bold text-sm text-white">Production Clean Slate (Cloudflare Deployment Prep)</h3>
+                </div>
+                <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">
+                  Permanently delete all demo and transaction records (products, sales, purchases, expenses, stock movements, debts, import history, and notifications). 
+                  Your system shop units and master Administrator account will remain active and ready for live inventory entry or Cloudflare backend integration.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setShowWipeConfirm(true)}
+                className="shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/40 font-semibold text-xs transition"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span>Delete All Demo Data</span>
+              </button>
             </div>
-            <p className="text-xs text-slate-400 mb-4 leading-relaxed">
-              Restore the entire local database from a previously exported Diocres backup file.
-            </p>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json"
-              onChange={handleRestoreFile}
-              className="hidden"
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs transition"
-            >
-              <Upload className="w-4 h-4" />
-              <span>Select .json Backup File</span>
-            </button>
           </div>
+
+          {/* Wipe Confirmation Modal */}
+          {showWipeConfirm && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+              <div className="bg-slate-900 border border-rose-800/60 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
+                <div className="flex items-center gap-3 text-rose-400">
+                  <div className="p-2 rounded-xl bg-rose-950/80 border border-rose-800/50">
+                    <AlertTriangle className="w-6 h-6" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-white">Delete All Demo & Transactional Data?</h4>
+                    <p className="text-[11px] text-slate-400">This action cannot be undone.</p>
+                  </div>
+                </div>
+
+                <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 text-xs text-slate-300 space-y-1.5">
+                  <p className="text-rose-300 font-semibold">The following will be completely cleared:</p>
+                  <ul className="list-disc pl-4 space-y-1 text-slate-400 text-[11px]">
+                    <li>All products & catalog items</li>
+                    <li>All sales transactions & receipts</li>
+                    <li>All purchase orders & inventory stock movements</li>
+                    <li>All shop & company expenses</li>
+                    <li>All debts & customer credit records</li>
+                    <li>All import logs & notifications</li>
+                  </ul>
+                  <p className="text-slate-400 text-[11px] pt-1">
+                    Your Administrator account (<span className="text-white font-mono font-bold">Admin</span>) and Shop units will be preserved.
+                  </p>
+                </div>
+
+                <div className="flex items-center justify-end gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowWipeConfirm(false)}
+                    disabled={isWiping}
+                    className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleWipeAllData}
+                    disabled={isWiping}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold shadow-lg transition disabled:opacity-50"
+                  >
+                    {isWiping ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Purging Data...</span>
+                      </>
+                    ) : (
+                      <>
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Confirm & Delete All</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

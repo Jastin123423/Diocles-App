@@ -78,4 +78,14 @@ export class BackupService {
     const res = BackupService.restoreBackup(jsonString, currentUser);
     return { success: res.success, error: res.success ? undefined : res.message };
   }
+
+  public static wipeAllData(currentUser: User): { success: boolean; error?: string } {
+    if (currentUser.role !== 'ADMIN') {
+      return { success: false, error: 'Permission Denied: Only Admin can clear database data.' };
+    }
+
+    db.wipeAllData(true);
+
+    return { success: true };
+  }
 }

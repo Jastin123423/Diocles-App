@@ -12,6 +12,10 @@ import {
 import { useApp } from '../../context/AppContext';
 import { ProductService } from '../../services/productService';
 import { formatCurrency } from '../../utils/formatters';
+import { Product, ProductImage } from '../../types';
+import { ProductThumbnail } from '../common/ProductThumbnail';
+import { ProductImageViewerModal } from '../common/ProductImageViewerModal';
+import { ProductImageUpload } from '../common/ProductImageUpload';
 
 export const SellerProducts: React.FC = () => {
   const { currentUser, dbState, addToast, sellerColor, selectedShopId, currentShop } = useApp();
@@ -30,12 +34,19 @@ export const SellerProducts: React.FC = () => {
   const [currentStock, setCurrentStock] = useState('0');
   const [minStock, setMinStock] = useState('5');
   const [unit, setUnit] = useState('pcs');
+  const [productImages, setProductImages] = useState<ProductImage[]>([]);
   const [formError, setFormError] = useState('');
+
+  // Image Viewer Modal State
+  const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
+  const [isViewerOpen, setIsViewerOpen] = useState(false);
 
   const settings = dbState.settings;
   const categories = dbState.categories;
 
-  const targetShopId = currentShop?.id || selectedShopId || (dbState.shops[0]?.id || 'shop-1');
+  const targetShopId = currentShop?.id || (selectedShopId && selectedShopId !== 'ALL' ? selectedShopId : dbState.shops[0]?.id || '');
+  const allCategories = dbState.categories || [];
+  const shopCategories = allCategories.filter(c => c.shopId === targetShopId);
 
   // Filtered Products
   const products = ProductService.getProducts({
@@ -64,21 +75,21 @@ export const SellerProducts: React.FC = () => {
 
     if (!currentUser) return;
 
-    const hardwareCat = categories.find(c => c.name.toLowerCase() === 'hardware' && c.status !== 'INACTIVE');
-    const firstActiveCat = categories.find(c => c.status !== 'INACTIVE');
+    const firstActiveCat = shopCategories.find(c => c.status !== 'INACTIVE');
 
     const result = ProductService.createProduct(
       {
-        shopId: targetShopId === 'ALL' ? (dbState.shops[0]?.id || 'shop-1') : targetShopId,
+        shopId: targetShopId,
         name,
         sku: sku.trim() || undefined,
         barcode: barcode.trim() || undefined,
-        categoryId: categoryId || hardwareCat?.id || firstActiveCat?.id || categories[0]?.id || 'cat-hardware',
+        categoryId: categoryId || firstActiveCat?.id || shopCategories[0]?.id || allCategories[0]?.id || 'cat-hardware',
         purchasePrice: costPrice,
         sellingPrice: price,
         currentStock: parseInt(currentStock, 10) || 0,
         minStock: parseInt(minStock, 10) || 5,
         unit,
+        images: productImages,
       },
       currentUser
     );
@@ -98,6 +109,7 @@ export const SellerProducts: React.FC = () => {
       setSellingPrice('');
       setCurrentStock('0');
       setMinStock('5');
+      setProductImages([]);
     } else {
       setFormError(result.error || 'Failed to create product.');
     }
@@ -117,7 +129,7 @@ export const SellerProducts: React.FC = () => {
         <button
           id="seller-add-product-btn"
           onClick={() => {
-            setCategoryId(categories[0]?.id || '');
+            setCategoryId(shopCategories[0]?.id || '');
             setShowAddModal(true);
           }}
           className="flex items-center gap-2 px-4 py-2.5 rounded-xl font-semibold text-xs text-white shadow-lg transition-all"
@@ -149,8 +161,8 @@ export const SellerProducts: React.FC = () => {
               onChange={e => setSelectedCategory(e.target.value)}
               className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
-              <option value="ALL">All Categories</option>
-              {categories.map(c => (
+              <option value="ALL">All Shop Categories</option>
+              {shopCategories.map(c => (
                 <option key={c.id} value={c.id}>
                   {c.name}
                 </option>
@@ -195,7 +207,17 @@ export const SellerProducts: React.FC = () => {
                   return (
                     <tr key={product.id} className="hover:bg-slate-850/60 transition">
                       <td className="py-3 px-4 font-semibold text-white">
-                        {product.name}
+                        <div className="flex items-center gap-3">
+                          <ProductThumbnail
+                            product={product}
+                            size="md"
+                            onClick={() => {
+                              setViewingProduct(product);
+                              setIsViewerOpen(true);
+                            }}
+                          />
+                          <span className="truncate">{product.name}</span>
+                        </div>
                       </td>
                       <td className="py-3 px-4 font-mono text-slate-400">
                         <div>{product.sku}</div>
@@ -287,7 +309,7 @@ export const SellerProducts: React.FC = () => {
                     onChange={e => setCategoryId(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
-                    {categories
+                    {shopCategories
                       .filter(c => c.status !== 'INACTIVE')
                       .map(c => (
                         <option key={c.id} value={c.id}>
@@ -404,6 +426,14 @@ export const SellerProducts: React.FC = () => {
                 </div>
               </div>
 
+              {/* Product Images (Optional - up to 3 images) */}
+              <div className="pt-2 border-t border-slate-800/80">
+                <ProductImageUpload
+                  images={productImages}
+                  onChange={setProductImages}
+                />
+              </div>
+
               <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
                 <button
                   type="button"
@@ -444,6 +474,14 @@ export const SellerProducts: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Product Image Gallery / Viewer Modal */}
+      <ProductImageViewerModal
+        product={viewingProduct}
+        isOpen={isViewerOpen}
+        onClose={() => setIsViewerOpen(false)}
+        currencySymbol={settings.currencySymbol}
+      />
     </div>
   );
 };

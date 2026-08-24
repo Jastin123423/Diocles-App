@@ -30,7 +30,7 @@ import {
   DEFAULT_ADMIN_HASH,
 } from './seedData';
 
-const DB_PREFIX = 'omnibiz_pos_db_v1_';
+const DB_PREFIX = 'omnibiz_pos_db_v3_';
 
 export interface DatabaseState {
   shops: Shop[];
@@ -57,7 +57,25 @@ class LocalDatabase {
   private memoryCache: DatabaseState | null = null;
 
   constructor() {
+    this.cleanupLegacyStorage();
     this.init();
+  }
+
+  private cleanupLegacyStorage(): void {
+    try {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const keysToRemove: string[] = [];
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && (key.startsWith('omnibiz_pos_db_v1_') || key.startsWith('omnibiz_pos_db_v2_'))) {
+            keysToRemove.push(key);
+          }
+        }
+        keysToRemove.forEach(k => localStorage.removeItem(k));
+      }
+    } catch (e) {
+      console.warn('[LocalDB] Legacy storage cleanup warning', e);
+    }
   }
 
   private getKey(table: string): string {
@@ -100,45 +118,14 @@ class LocalDatabase {
     const syncQueue = this.loadTable<SyncQueueItem[]>('sync_queue', []);
     const importHistory = this.loadTable<ImportHistoryItem[]>('import_history', INITIAL_IMPORT_HISTORY);
 
-    // Ensure categories have status and Hardware category exists
-    let categoriesModified = false;
-    if (!categories || categories.length === 0) {
-      categories = INITIAL_CATEGORIES;
-      categoriesModified = true;
-    } else {
-      categories = categories.map(cat => {
-        if (!cat.status) {
-          categoriesModified = true;
-          return { ...cat, status: 'ACTIVE' as const };
-        }
-        return cat;
-      });
-      const hasHardware = categories.some(c => c.name.toLowerCase() === 'hardware' || c.id === 'cat-hardware');
-      if (!hasHardware) {
-        categories.unshift({
-          id: 'cat-hardware',
-          name: 'Hardware',
-          icon: 'Hammer',
-          color: '#64748b',
-          status: 'ACTIVE' as const,
-        });
-        categoriesModified = true;
-      }
-    }
-    if (categoriesModified) {
-      this.saveTable('categories', categories);
+    // Ensure users have Admin account
+    if (!users || users.length === 0) {
+      users = INITIAL_USERS;
+      this.saveTable('users', users);
     }
 
-    // Ensure shops exist
-    if (!shops || shops.length === 0) {
-      shops = INITIAL_SHOPS;
-      this.saveTable('shops', shops);
-    }
-
-    const defaultShopId = shops[0]?.id || 'shop-hardware-03';
-
-    // Ensure users have assignedShopIds and Admin has all shops
-    const allShopIds = shops.map(s => s.id);
+    // Ensure Admin has all shops assigned
+    const allShopIds = (shops || []).map(s => s.id);
     let usersModified = false;
     users = users.map(u => {
       let mod = false;
@@ -146,18 +133,11 @@ class LocalDatabase {
       if (copy.role === 'ADMIN') {
         if (copy.username.toLowerCase() === 'admin') {
           copy.username = 'Admin';
-          copy.passwordHash = DEFAULT_ADMIN_HASH;
+          copy.passwordHash = copy.passwordHash || DEFAULT_ADMIN_HASH;
           mod = true;
         }
-        if (!copy.assignedShopIds || copy.assignedShopIds.length !== allShopIds.length) {
-          copy.assignedShopIds = allShopIds;
-          mod = true;
-        }
-      } else {
-        if (!copy.assignedShopIds || copy.assignedShopIds.length === 0) {
-          copy.assignedShopIds = [defaultShopId];
-          mod = true;
-        }
+        copy.assignedShopIds = allShopIds;
+        mod = true;
       }
       if (mod) usersModified = true;
       return copy;
@@ -165,66 +145,6 @@ class LocalDatabase {
 
     if (usersModified) {
       this.saveTable('users', users);
-    }
-
-    // Ensure all products have a valid shopId
-    let productsModified = false;
-    products = products.map(p => {
-      if (!p.shopId) {
-        productsModified = true;
-        return { ...p, shopId: defaultShopId };
-      }
-      return p;
-    });
-    if (productsModified) {
-      this.saveTable('products', products);
-    }
-
-    // Ensure all sales have shopId and items have shopId
-    let salesModified = false;
-    sales = sales.map(s => {
-      if (!s.shopId) {
-        salesModified = true;
-        const targetShop = shops.find(sh => sh.id === defaultShopId);
-        return {
-          ...s,
-          shopId: defaultShopId,
-          shopName: targetShop?.name || 'Main Shop',
-          items: s.items.map(item => ({ ...item, shopId: item.shopId || defaultShopId })),
-        };
-      }
-      return s;
-    });
-    if (salesModified) {
-      this.saveTable('sales', sales);
-    }
-
-    // Ensure purchases have shopId
-    let purchasesModified = false;
-    purchases = purchases.map(po => {
-      if (!po.shopId) {
-        purchasesModified = true;
-        const targetShop = shops.find(sh => sh.id === defaultShopId);
-        return { ...po, shopId: defaultShopId, shopName: targetShop?.name || 'Main Shop' };
-      }
-      return po;
-    });
-    if (purchasesModified) {
-      this.saveTable('purchases', purchases);
-    }
-
-    // Ensure movements have shopId
-    let movementsModified = false;
-    movements = movements.map(m => {
-      if (!m.shopId) {
-        movementsModified = true;
-        const targetShop = shops.find(sh => sh.id === defaultShopId);
-        return { ...m, shopId: defaultShopId, shopName: targetShop?.name || 'Main Shop' };
-      }
-      return m;
-    });
-    if (movementsModified) {
-      this.saveTable('movements', movements);
     }
 
     // Ensure business branding is correct and currency is TSh
@@ -256,24 +176,23 @@ class LocalDatabase {
     const notifications = this.loadTable<AppNotification[]>('notifications', []);
 
     this.memoryCache = {
-      shops,
-      users,
-      categories,
-      products,
-      sales,
-      purchases,
-      expenses,
-      movements,
+      shops: shops || [],
+      users: users || [],
+      categories: categories || [],
+      products: products || [],
+      sales: sales || [],
+      purchases: purchases || [],
+      expenses: expenses || [],
+      movements: movements || [],
       settings,
-      auditLogs,
-      syncQueue,
-      importHistory,
-      debts,
-      notifications,
+      auditLogs: auditLogs || [],
+      syncQueue: syncQueue || [],
+      importHistory: importHistory || [],
+      debts: debts || [],
+      notifications: notifications || [],
     };
 
     return this.memoryCache;
-
   }
 
   public getState(): DatabaseState {
@@ -606,24 +525,43 @@ class LocalDatabase {
     }
   }
 
-  public resetToDefaultDemo(): void {
-    this.saveTable('shops', INITIAL_SHOPS);
-    this.saveTable('users', INITIAL_USERS);
-    this.saveTable('categories', INITIAL_CATEGORIES);
-    this.saveTable('products', INITIAL_PRODUCTS);
-    this.saveTable('sales', INITIAL_SALES);
-    this.saveTable('purchases', INITIAL_PURCHASES);
-    this.saveTable('expenses', INITIAL_EXPENSES);
-    this.saveTable('movements', INITIAL_MOVEMENTS);
-    this.saveTable('settings', INITIAL_SETTINGS);
-    this.saveTable('audit_logs', INITIAL_AUDIT_LOGS);
+  public wipeAllData(keepShopsAndAdmin: boolean = true): void {
+    const shops = keepShopsAndAdmin ? (this.memoryCache?.shops?.length ? this.memoryCache.shops : INITIAL_SHOPS) : INITIAL_SHOPS;
+    const users = keepShopsAndAdmin ? (this.memoryCache?.users?.length ? this.memoryCache.users : INITIAL_USERS) : INITIAL_USERS;
+    const settings = this.memoryCache?.settings || INITIAL_SETTINGS;
+
+    this.saveTable('shops', shops);
+    this.saveTable('users', users);
+    this.saveTable('categories', []);
+    this.saveTable('products', []);
+    this.saveTable('sales', []);
+    this.saveTable('purchases', []);
+    this.saveTable('expenses', []);
+    this.saveTable('movements', []);
+    this.saveTable('settings', settings);
+    this.saveTable('audit_logs', [
+      {
+        id: `audit-wipe-${Date.now()}`,
+        userId: users[0]?.id || 'user-admin-01',
+        userName: users[0]?.name || 'Administrator',
+        action: 'SYSTEM_INITIALIZATION',
+        details: 'Wiped all demo and transactional data in preparation for live Cloudflare deployment',
+        entityType: 'SETTINGS',
+        timestamp: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      },
+    ]);
     this.saveTable('sync_queue', []);
-    this.saveTable('import_history', INITIAL_IMPORT_HISTORY);
-    this.saveTable('debts', INITIAL_DEBTS);
+    this.saveTable('import_history', []);
+    this.saveTable('debts', []);
     this.saveTable('notifications', []);
 
     this.init();
     this.notify();
+  }
+
+  public resetToDefaultDemo(): void {
+    this.wipeAllData(true);
   }
 }
 

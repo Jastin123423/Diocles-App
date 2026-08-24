@@ -1,6 +1,7 @@
 import { db } from '../db/storage';
-import { Product, ProductStatus, User } from '../types';
+import { Product, ProductImage, ProductStatus, User } from '../types';
 import { generateUUID } from '../utils/crypto';
+import { normalizeProductImages } from '../utils/imageUtils';
 
 export class ProductService {
   public static getProducts(options?: {
@@ -71,6 +72,8 @@ export class ProductService {
       minStock?: number;
       unit?: string;
       status?: ProductStatus;
+      images?: ProductImage[];
+      imageUrl?: string;
     },
     currentUser: User
   ): { success: boolean; product?: Product; error?: string } {
@@ -103,8 +106,17 @@ export class ProductService {
       return { success: false, error: `SKU '${cleanSku}' already exists in this shop.` };
     }
 
+    const productId = generateUUID();
+    const normalizedImages = data.images && data.images.length > 0
+      ? normalizeProductImages(data.images.map(img => ({ ...img, productId })))
+      : undefined;
+
+    const mainImageUrl = normalizedImages && normalizedImages.length > 0
+      ? (normalizedImages[0].thumbnailUrl || normalizedImages[0].dataUrl)
+      : data.imageUrl;
+
     const newProduct: Product = {
-      id: generateUUID(),
+      id: productId,
       shopId: data.shopId,
       name: data.name.trim(),
       sku: cleanSku,
@@ -116,6 +128,8 @@ export class ProductService {
       minStock: Number(data.minStock ?? 5),
       unit: data.unit?.trim() || 'pcs',
       status: data.status || 'ACTIVE',
+      images: normalizedImages,
+      imageUrl: mainImageUrl,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -205,9 +219,22 @@ export class ProductService {
       }
     }
 
+    let finalImages = updates.images !== undefined ? updates.images : current.images;
+    if (finalImages && finalImages.length > 0) {
+      finalImages = normalizeProductImages(finalImages.map(img => ({ ...img, productId: id })));
+    } else {
+      finalImages = undefined;
+    }
+
+    const finalImageUrl = finalImages && finalImages.length > 0
+      ? (finalImages[0].thumbnailUrl || finalImages[0].dataUrl)
+      : (updates.imageUrl !== undefined ? updates.imageUrl : (finalImages ? undefined : current.imageUrl));
+
     const updatedProduct: Product = {
       ...current,
       ...updates,
+      images: finalImages,
+      imageUrl: finalImageUrl,
       updatedAt: new Date().toISOString(),
     };
 
