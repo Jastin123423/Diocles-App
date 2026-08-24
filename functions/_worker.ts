@@ -1,4 +1,4 @@
-// functions/_worker.ts (TEST VERSION)
+// functions/_worker.ts (SIMPLE TEST - No imports)
 export default {
   async fetch(request: Request, env: any) {
     const url = new URL(request.url);
@@ -16,9 +16,6 @@ export default {
       });
     }
     
-    return new Response(JSON.stringify({ error: 'Not found' }), {
-      status: 404,
-      headers: { 'Content-Type': 'application/json' },
-    });
+    return new Response('Not Found', { status: 404 });
   }
 };
