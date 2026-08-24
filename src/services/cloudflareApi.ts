@@ -6,7 +6,7 @@ export interface CloudflareConfig {
 
 export class CloudflareApi {
   private static config: CloudflareConfig = {
-    baseUrl: 'https://your-worker.workers.dev', // UPDATE THIS AFTER DEPLOYMENT
+    baseUrl: 'baseUrl: 'https://diocles-app.pages.dev', 
     deviceId: '',
   };
 
