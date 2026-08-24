@@ -62,7 +62,8 @@
     "vite": "^6.2.3",
     "express": "^4.21.2",
     "dotenv": "^17.2.3",
-    "motion": "^12.23.24"
+    "motion": "^12.23.24",
+    "itty-router": "^5.0.0"
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
@@ -80,7 +81,10 @@
   },
   "optionalDependencies": {
     "@rollup/rollup-win32-x64-msvc": "^4.34.8",
+    "@rollup/rollup-linux-x64-gnu": "^4.34.8",
     "@tailwindcss/oxide-win32-x64-msvc": "^4.1.14",
-    "lightningcss-win32-x64-msvc": "^1.29.1"
+    "@tailwindcss/oxide-linux-x64-gnu": "^4.1.14",
+    "lightningcss-win32-x64-msvc": "^1.29.1",
+    "lightningcss-linux-x64-gnu": "^1.29.1"
   }
 }
