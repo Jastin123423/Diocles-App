@@ -1,3 +1,14 @@
+export async function onRequestOptions() {
+  return new Response(null, {
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Device-ID',
+      'Access-Control-Max-Age': '86400',
+    },
+  });
+}
+
 export async function onRequestGet(context: any) {
   const { request, env } = context;
   const url = new URL(request.url);
@@ -9,11 +20,14 @@ export async function onRequestGet(context: any) {
     const shopsResult = await env.DB.prepare('SELECT * FROM shops WHERE updated_at > ?').bind(since).all();
     state.shops = shopsResult.results;
 
-    const productsResult = await env.DB.prepare('SELECT * FROM products WHERE updated_at > ?').bind(since).all();
-    state.products = productsResult.results;
+    const usersResult = await env.DB.prepare('SELECT * FROM users WHERE updated_at > ?').bind(since).all();
+    state.users = usersResult.results;
 
     const categoriesResult = await env.DB.prepare('SELECT * FROM categories WHERE updated_at > ?').bind(since).all();
     state.categories = categoriesResult.results;
+
+    const productsResult = await env.DB.prepare('SELECT * FROM products WHERE updated_at > ?').bind(since).all();
+    state.products = productsResult.results;
 
     const salesResult = await env.DB.prepare('SELECT * FROM sales WHERE created_at > ?').bind(since).all();
     state.sales = salesResult.results;
