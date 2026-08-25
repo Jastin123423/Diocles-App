@@ -5,6 +5,7 @@ import { SyncService, SyncState } from '../services/syncService';
 import { CloudflareApi } from '../services/cloudflareApi';
 import { User, Sale, ToastMessage, Shop } from '../types';
 import { getColorOption } from '../utils/colors';
+import { generateUUID } from '../utils/crypto';
 
 interface AppContextType {
   currentUser: User | null;
@@ -30,6 +31,8 @@ interface AppContextType {
   // Sync status
   syncStatus: { state: SyncState; pendingCount: number };
   triggerSync: () => Promise<void>;
+  // Settings
+  updateSettings: (settings: any) => void;
   // Seller color theme
   sellerColor: ReturnType<typeof getColorOption>;
 }
@@ -64,7 +67,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return allShops;
     }
 
-    // For Seller, only active shops they are assigned to
     const assigned = currentUser.assignedShopIds || [];
     return allShops.filter(s => s.status === 'ACTIVE' && assigned.includes(s.id));
   }, [dbState.shops, currentUser]);
@@ -82,23 +84,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setDbState({ ...state });
       setSyncStatus(SyncService.getSyncStatus());
 
-      // If user is logged in, refresh their current state
       if (currentUser) {
         const freshUser = state.users.find(u => u.id === currentUser.id);
         if (freshUser) {
           if (freshUser.status !== 'ACTIVE') {
-            // Force logout if account deactivated by admin
             AuthService.logout();
             setCurrentUser(null);
-            setToasts(prev => [
-              ...prev,
-              {
-                id: Date.now().toString(),
-                type: 'warning',
-                title: 'Account Deactivated',
-                description: 'Your seller account has been deactivated by an Administrator.',
-              },
-            ]);
+            setToasts(prev => [...prev, {
+              id: Date.now().toString(),
+              type: 'warning',
+              title: 'Account Deactivated',
+              description: 'Your seller account has been deactivated by an Administrator.',
+            }]);
           } else {
             setCurrentUser(freshUser);
             AuthService.setActiveUser(freshUser);
@@ -110,46 +107,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => unsubscribe();
   }, [currentUser]);
 
-  // LIVE SYNC: Continuous sync every 5 seconds when online
+  // LIVE SYNC: Continuous sync every 2 seconds when online
   useEffect(() => {
     const liveSync = async () => {
-      // Prevent overlapping syncs
       if (isSyncingRef.current) return;
       
       try {
-        // Check if online
         const online = await CloudflareApi.checkConnection();
         
         if (online) {
           isSyncingRef.current = true;
           
-          // 1. Push any pending local changes
           const pendingCount = SyncService.getPendingCount();
           if (pendingCount > 0) {
             await SyncService.processSyncQueue(currentUser || undefined);
           }
           
-          // 2. Pull latest cloud data
-          const pullResult = await CloudflareApi.pullSync(
-            localStorage.getItem('omnibiz_last_synced_at') || undefined
-          );
+          const pullResult = await CloudflareApi.pullSync();
           
           if (pullResult.success && pullResult.data) {
             SyncService.applyCloudData(pullResult.data);
             
-            // Update last synced timestamp
             const now = new Date().toISOString();
             localStorage.setItem('omnibiz_last_synced_at', now);
             
-            // Update local state to reflect pulled data
             const state = db.getState();
             setDbState({ ...state });
             setSyncStatus(SyncService.getSyncStatus());
           }
           
           isSyncingRef.current = false;
-        } else {
-          console.log('[LiveSync] Offline, using local data only');
         }
       } catch (error) {
         console.log('[LiveSync] Error:', error);
@@ -157,20 +144,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     };
 
-    // Run immediately on mount
     liveSync();
-
-    // Set interval to sync every 5 seconds for live updates
-    const interval = setInterval(liveSync, 5000);
-
+    const interval = setInterval(liveSync, 2000);
     return () => clearInterval(interval);
   }, [currentUser]);
 
-  // Listen for online/offline events for immediate sync
+  // Listen for online/offline events
   useEffect(() => {
     const handleOnline = () => {
-      console.log('[LiveSync] Connection restored, syncing immediately...');
-      // Trigger sync when back online
+      console.log('[LiveSync] Connection restored');
       if (currentUser) {
         SyncService.processSyncQueue(currentUser).then(() => {
           const state = db.getState();
@@ -181,7 +163,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
 
     const handleOffline = () => {
-      console.log('[LiveSync] Connection lost, switching to offline mode');
+      console.log('[LiveSync] Connection lost');
       setSyncStatus({ state: 'OFFLINE_LOCAL', pendingCount: SyncService.getPendingCount() });
     };
 
@@ -204,7 +186,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
 
       if (sellerShops.length > 0) {
-        // If current selection is 'ALL' or not in seller's shops, auto select first assigned shop
         const isCurrentValid = sellerShops.some(s => s.id === selectedShopId);
         if (!isCurrentValid || selectedShopId === 'ALL') {
           setSelectedShopId(sellerShops[0].id);
@@ -224,9 +205,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (user.role === 'ADMIN') {
       setActiveTab('dashboard');
-      // Keep previous shop selection or 'ALL'
     } else {
-      setActiveTab('new_sale'); // sellers land directly on fast POS
+      setActiveTab('new_sale');
       const sellerShops = (dbState.shops || []).filter(
         s => s.status === 'ACTIVE' && (user.assignedShopIds || []).includes(s.id)
       );
@@ -238,7 +218,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast({
       type: 'success',
       title: `Welcome back, ${user.name}`,
-      description: `Logged in to Windows ${user.role} Portal (Offline-Ready)`,
+      description: `Logged in as ${user.role}`,
     });
   };
 
@@ -249,7 +229,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast({
       type: 'info',
       title: 'Logged Out',
-      description: 'Session ended securely. Local data remains saved.',
+      description: 'Session ended securely.',
     });
   };
 
@@ -286,8 +266,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         type: 'success',
         title: 'Synchronization Complete',
         description: res.processedCount > 0 
-          ? `Synced ${res.processedCount} queued records to cloud.` 
-          : 'All local records are up to date with cloud.',
+          ? `Synced ${res.processedCount} records to cloud.` 
+          : 'All records up to date.',
       });
     } else {
       addToast({
@@ -298,7 +278,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // Dynamically resolve seller color
+  const updateSettings = (newSettings: any) => {
+    const currentSettings = db.getSettings();
+    const updatedSettings = { ...currentSettings, ...newSettings };
+    db.saveSettings(updatedSettings);
+    
+    db.enqueueSync({
+      id: generateUUID(),
+      operation: 'UPDATE_SETTINGS',
+      entityType: 'SETTINGS',
+      entityId: 'global',
+      payload: updatedSettings,
+      status: 'PENDING',
+      createdAt: new Date().toISOString(),
+    });
+    
+    setDbState(db.getState());
+    setSyncStatus(SyncService.getSyncStatus());
+  };
+
   const sellerColor = useMemo(() => {
     return getColorOption(currentUser?.color || 'blue');
   }, [currentUser?.color]);
@@ -325,6 +323,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         closeReceipt,
         syncStatus,
         triggerSync,
+        updateSettings,
         sellerColor,
       }}
     >
