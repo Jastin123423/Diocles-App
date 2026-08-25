@@ -1,4 +1,4 @@
-// src/services/syncService.ts (SAFE UPDATE)
+// src/services/syncService.ts (UPDATED WITH applyCloudData)
 import { db } from '../db/storage';
 import { SyncQueueItem, User } from '../types';
 import { CloudflareApi } from './cloudflareApi';
@@ -33,14 +33,18 @@ export class SyncService {
     const pending = queue.filter(q => q.status === 'PENDING').length;
 
     if (SyncService.isSyncing) {
-      return { state: 'SYNCING', pendingCount: pending };
+      return { state: 'SYNCING', pendingCount: pending, lastSyncedAt: this.lastSyncedAt || undefined };
     }
 
     if (pending > 0) {
-      return { state: 'PENDING_SYNC', pendingCount: pending };
+      return { state: 'PENDING_SYNC', pendingCount: pending, lastSyncedAt: this.lastSyncedAt || undefined };
     }
 
-    return { state: 'OFFLINE_LOCAL', pendingCount: 0 };
+    return { 
+      state: this.lastSyncedAt ? 'SYNCED' : 'OFFLINE_LOCAL', 
+      pendingCount: 0,
+      lastSyncedAt: this.lastSyncedAt || undefined 
+    };
   }
 
   public static async processSyncQueue(currentUser?: User): Promise<{ success: boolean; processedCount: number; message?: string }> {
@@ -48,12 +52,11 @@ export class SyncService {
     const online = await CloudflareApi.checkConnection();
     
     if (!online) {
-      // Fallback to simulation for offline mode
-      return SyncService.simulateServerSync().then(res => ({
-        success: res.success,
-        processedCount: res.syncedCount,
-        message: `Offline mode: ${res.syncedCount} operations processed locally.`,
-      }));
+      return { 
+        success: false, 
+        processedCount: 0, 
+        message: 'Offline mode: Working locally. Will sync when online.' 
+      };
     }
 
     if (SyncService.isSyncing) {
@@ -66,47 +69,52 @@ export class SyncService {
       const queue = db.getSyncQueue();
       const pendingItems = queue.filter(item => item.status === 'PENDING');
 
-      if (pendingItems.length === 0) {
-        SyncService.isSyncing = false;
-        return { success: true, processedCount: 0, message: 'No pending items to sync.' };
+      // 1. PUSH local changes if any
+      if (pendingItems.length > 0) {
+        const operations = pendingItems.map(item => ({
+          id: item.id,
+          operation: item.operation || item.action,
+          entityType: item.entityType,
+          entityId: item.entityId,
+          payload: item.payload,
+        }));
+
+        const pushResult = await CloudflareApi.pushSync(operations);
+
+        if (pushResult.success) {
+          const updatedQueue = queue.map(item => {
+            if (item.status === 'PENDING') {
+              return { ...item, status: 'SYNCED' as const };
+            }
+            return item;
+          });
+          db.saveSyncQueue(updatedQueue);
+        }
       }
 
-      const operations = pendingItems.map(item => ({
-        id: item.id,
-        operation: item.operation || item.action,
-        entityType: item.entityType,
-        entityId: item.entityId,
-        payload: item.payload,
-      }));
-
-      const pushResult = await CloudflareApi.pushSync(operations);
-
-      if (pushResult.success) {
-        const updatedQueue = queue.map(item => {
-          if (item.status === 'PENDING') {
-            return { ...item, status: 'SYNCED' as const };
-          }
-          return item;
-        });
-        db.saveSyncQueue(updatedQueue);
+      // 2. PULL latest cloud data
+      const pullResult = await CloudflareApi.pullSync(this.lastSyncedAt || undefined);
+      
+      if (pullResult.success && pullResult.data) {
+        this.applyCloudData(pullResult.data);
+        this.lastSyncedAt = new Date().toISOString();
+        localStorage.setItem('omnibiz_last_synced_at', this.lastSyncedAt);
       }
 
       SyncService.isSyncing = false;
 
       return {
-        success: pushResult.success,
-        processedCount: pushResult.processedCount || pendingItems.length,
-        message: `Cloud sync: ${pushResult.processedCount || pendingItems.length} operations synced.`,
+        success: true,
+        processedCount: pendingItems.length,
+        message: `Cloud sync complete: ${pendingItems.length} pushed, cloud data pulled.`,
       };
     } catch (error: any) {
       SyncService.isSyncing = false;
-      
-      // Fallback to simulation on error
-      return SyncService.simulateServerSync().then(res => ({
-        success: res.success,
-        processedCount: res.syncedCount,
-        message: `Cloud unavailable, local sync: ${res.syncedCount} operations processed.`,
-      }));
+      return { 
+        success: false, 
+        processedCount: 0, 
+        message: `Cloud sync failed: ${error.message}. Working offline.` 
+      };
     }
   }
 
@@ -142,5 +150,265 @@ export class SyncService {
   public static clearCompleted(): void {
     const queue = db.getSyncQueue().filter(q => q.status !== 'SYNCED');
     db.saveSyncQueue(queue);
+  }
+
+  // ==========================================
+  // APPLY CLOUD DATA TO LOCAL DATABASE
+  // ==========================================
+  public static applyCloudData(cloudData: any): void {
+    if (!cloudData) return;
+
+    // Apply shops
+    if (cloudData.shops && cloudData.shops.length > 0) {
+      const localShops = db.getShops();
+      const merged = [...localShops];
+      
+      cloudData.shops.forEach((cloudShop: any) => {
+        const index = merged.findIndex(s => s.id === cloudShop.id);
+        const shopData = {
+          id: cloudShop.id,
+          name: cloudShop.name,
+          code: cloudShop.code,
+          description: cloudShop.description,
+          address: cloudShop.address,
+          phone: cloudShop.phone,
+          status: cloudShop.status,
+          color: cloudShop.color,
+          createdAt: cloudShop.created_at,
+          updatedAt: cloudShop.updated_at,
+        };
+        
+        if (index === -1) {
+          merged.push(shopData);
+        } else {
+          merged[index] = { ...merged[index], ...shopData };
+        }
+      });
+      
+      db.saveShops(merged);
+    }
+
+    // Apply users
+    if (cloudData.users && cloudData.users.length > 0) {
+      const localUsers = db.getUsers();
+      const mergedUsers = [...localUsers];
+      
+      cloudData.users.forEach((cloudUser: any) => {
+        const index = mergedUsers.findIndex(u => u.id === cloudUser.id);
+        const userData = {
+          id: cloudUser.id,
+          username: cloudUser.username,
+          name: cloudUser.name,
+          role: cloudUser.role,
+          passwordHash: cloudUser.password_hash,
+          color: cloudUser.color,
+          status: cloudUser.status,
+          assignedShopIds: cloudUser.assigned_shop_ids ? JSON.parse(cloudUser.assigned_shop_ids) : [],
+          createdAt: cloudUser.created_at,
+          updatedAt: cloudUser.updated_at,
+        };
+        
+        if (index === -1) {
+          mergedUsers.push(userData);
+        } else {
+          mergedUsers[index] = { ...mergedUsers[index], ...userData };
+        }
+      });
+      
+      db.saveUsers(mergedUsers);
+    }
+
+    // Apply categories
+    if (cloudData.categories && cloudData.categories.length > 0) {
+      const localCats = db.getCategories();
+      const mergedCats = [...localCats];
+      
+      cloudData.categories.forEach((cloudCat: any) => {
+        const index = mergedCats.findIndex(c => c.id === cloudCat.id);
+        const catData = {
+          id: cloudCat.id,
+          shopId: cloudCat.shop_id,
+          name: cloudCat.name,
+          icon: cloudCat.icon,
+          color: cloudCat.color,
+          status: cloudCat.status,
+          createdAt: cloudCat.created_at,
+          updatedAt: cloudCat.updated_at,
+        };
+        
+        if (index === -1) {
+          mergedCats.push(catData);
+        } else {
+          mergedCats[index] = { ...mergedCats[index], ...catData };
+        }
+      });
+      
+      db.saveCategories(mergedCats);
+    }
+
+    // Apply products
+    if (cloudData.products && cloudData.products.length > 0) {
+      const localProducts = db.getProducts();
+      const mergedProducts = [...localProducts];
+      
+      cloudData.products.forEach((cloudProduct: any) => {
+        const index = mergedProducts.findIndex(p => p.id === cloudProduct.id);
+        const productData = {
+          id: cloudProduct.id,
+          shopId: cloudProduct.shop_id,
+          name: cloudProduct.name,
+          sku: cloudProduct.sku,
+          barcode: cloudProduct.barcode || '',
+          categoryId: cloudProduct.category_id,
+          sellingPrice: cloudProduct.selling_price,
+          proposedSellingPrice: cloudProduct.proposed_selling_price,
+          purchasePrice: cloudProduct.purchase_price,
+          currentStock: cloudProduct.current_stock,
+          minStock: cloudProduct.min_stock,
+          unit: cloudProduct.unit,
+          status: cloudProduct.status,
+          imageUrl: cloudProduct.image_url,
+          createdAt: cloudProduct.created_at,
+          updatedAt: cloudProduct.updated_at,
+        };
+        
+        if (index === -1) {
+          mergedProducts.push(productData);
+        } else {
+          mergedProducts[index] = { ...mergedProducts[index], ...productData };
+        }
+      });
+      
+      db.saveProducts(mergedProducts);
+    }
+
+    // Apply sales
+    if (cloudData.sales && cloudData.sales.length > 0) {
+      const localSales = db.getSales();
+      const mergedSales = [...localSales];
+      
+      cloudData.sales.forEach((cloudSale: any) => {
+        const index = mergedSales.findIndex(s => s.id === cloudSale.id);
+        const saleData = {
+          id: cloudSale.id,
+          receiptNumber: cloudSale.receipt_number,
+          shopId: cloudSale.shop_id,
+          shopName: cloudSale.shop_name,
+          sellerId: cloudSale.seller_id,
+          sellerName: cloudSale.seller_name,
+          subtotal: cloudSale.subtotal,
+          discount: cloudSale.discount,
+          tax: cloudSale.tax,
+          total: cloudSale.total,
+          costOfGoods: cloudSale.cost_of_goods,
+          grossProfit: cloudSale.gross_profit,
+          paymentMethod: cloudSale.payment_method,
+          amountReceived: cloudSale.amount_received,
+          change: cloudSale.change,
+          status: cloudSale.status,
+          notes: cloudSale.notes,
+          createdAt: cloudSale.created_at,
+          items: [],
+        };
+        
+        if (index === -1) {
+          mergedSales.push(saleData);
+        } else {
+          mergedSales[index] = { ...mergedSales[index], ...saleData };
+        }
+      });
+      
+      db.saveSales(mergedSales);
+    }
+
+    // Apply expenses
+    if (cloudData.expenses && cloudData.expenses.length > 0) {
+      const localExpenses = db.getExpenses();
+      const mergedExpenses = [...localExpenses];
+      
+      cloudData.expenses.forEach((cloudExpense: any) => {
+        const index = mergedExpenses.findIndex(e => e.id === cloudExpense.id);
+        const expenseData = {
+          id: cloudExpense.id,
+          shopId: cloudExpense.shop_id,
+          shopName: cloudExpense.shop_name,
+          isCompanyExpense: !!cloudExpense.is_company_expense,
+          category: cloudExpense.category,
+          description: cloudExpense.description,
+          title: cloudExpense.title,
+          amount: cloudExpense.amount,
+          paymentMethod: cloudExpense.payment_method,
+          date: cloudExpense.date,
+          reference: cloudExpense.reference,
+          notes: cloudExpense.notes,
+          createdByUserId: cloudExpense.created_by_user_id,
+          createdByName: cloudExpense.created_by_name,
+          createdAt: cloudExpense.created_at,
+        };
+        
+        if (index === -1) {
+          mergedExpenses.push(expenseData);
+        } else {
+          mergedExpenses[index] = { ...mergedExpenses[index], ...expenseData };
+        }
+      });
+      
+      db.saveExpenses(mergedExpenses);
+    }
+
+    // Apply movements
+    if (cloudData.movements && cloudData.movements.length > 0) {
+      const localMovements = db.getMovements();
+      const mergedMovements = [...localMovements];
+      
+      cloudData.movements.forEach((cloudMovement: any) => {
+        const index = mergedMovements.findIndex(m => m.id === cloudMovement.id);
+        const movementData = {
+          id: cloudMovement.id,
+          shopId: cloudMovement.shop_id,
+          shopName: cloudMovement.shop_name,
+          productId: cloudMovement.product_id,
+          productName: cloudMovement.product_name,
+          previousQty: cloudMovement.previous_qty,
+          changeQty: cloudMovement.change_qty,
+          newQty: cloudMovement.new_qty,
+          type: cloudMovement.type,
+          reason: cloudMovement.reason,
+          costValue: cloudMovement.cost_value,
+          referenceId: cloudMovement.reference_id,
+          userId: cloudMovement.user_id,
+          userName: cloudMovement.user_name,
+          createdAt: cloudMovement.created_at,
+        };
+        
+        if (index === -1) {
+          mergedMovements.push(movementData);
+        } else {
+          mergedMovements[index] = { ...mergedMovements[index], ...movementData };
+        }
+      });
+      
+      db.saveMovements(mergedMovements);
+    }
+
+    // Apply settings
+    if (cloudData.settings) {
+      const localSettings = db.getSettings();
+      const mergedSettings = { ...localSettings };
+      
+      if (cloudData.settings.business_name) mergedSettings.businessName = cloudData.settings.business_name;
+      if (cloudData.settings.tagline) mergedSettings.tagline = cloudData.settings.tagline;
+      if (cloudData.settings.address) mergedSettings.address = cloudData.settings.address;
+      if (cloudData.settings.phone) mergedSettings.phone = cloudData.settings.phone;
+      if (cloudData.settings.email) mergedSettings.email = cloudData.settings.email;
+      if (cloudData.settings.currency_symbol) mergedSettings.currencySymbol = cloudData.settings.currency_symbol;
+      if (cloudData.settings.currency_code) mergedSettings.currencyCode = cloudData.settings.currency_code;
+      if (cloudData.settings.tax_rate_percent !== undefined) mergedSettings.taxRatePercent = cloudData.settings.tax_rate_percent;
+      if (cloudData.settings.enable_tax !== undefined) mergedSettings.enableTax = !!cloudData.settings.enable_tax;
+      if (cloudData.settings.receipt_header_note) mergedSettings.receiptHeaderNote = cloudData.settings.receipt_header_note;
+      if (cloudData.settings.receipt_footer_note) mergedSettings.receiptFooterNote = cloudData.settings.receipt_footer_note;
+      
+      db.saveSettings(mergedSettings);
+    }
   }
 }
