@@ -1,4 +1,4 @@
-// src/services/syncService.ts (UPDATED WITH SALE ITEMS)
+// src/services/syncService.ts (COMPLETE WITH AVATAR URL)
 import { db } from '../db/storage';
 import { SyncQueueItem, User } from '../types';
 import { CloudflareApi } from './cloudflareApi';
@@ -204,6 +204,7 @@ export class SyncService {
           color: cloudUser.color,
           status: cloudUser.status,
           assignedShopIds: cloudUser.assigned_shop_ids ? JSON.parse(cloudUser.assigned_shop_ids) : [],
+          avatarUrl: cloudUser.avatar_url || cloudUser.avatarUrl || null,
           createdAt: cloudUser.created_at,
           updatedAt: cloudUser.updated_at,
         };
