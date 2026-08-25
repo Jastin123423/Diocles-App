@@ -1,5 +1,6 @@
 import { db } from '../db/storage';
 import { DebtRecord, DebtSummary, DebtType, DebtStatus, DebtPayment, User } from '../types';
+import { generateUUID } from '../utils/crypto';
 
 export class DebtService {
   /**
@@ -198,6 +199,18 @@ export class DebtService {
     };
 
     db.addDebt(record);
+
+    // Enqueue sync for cloud
+    db.enqueueSync({
+      id: generateUUID(),
+      operation: 'CREATE_DEBT',
+      entityType: 'DEBT',
+      entityId: record.id,
+      payload: record,
+      status: 'PENDING',
+      createdAt: now,
+    });
+
     return record;
   }
 
@@ -278,6 +291,18 @@ export class DebtService {
     db.updateDebt(debtId, patch);
 
     const updated = { ...existing, ...patch };
+
+    // Enqueue sync for cloud
+    db.enqueueSync({
+      id: generateUUID(),
+      operation: 'UPDATE_DEBT',
+      entityType: 'DEBT',
+      entityId: debtId,
+      payload: updated,
+      status: 'PENDING',
+      createdAt: now,
+    });
+
     return { success: true, debt: updated };
   }
 
@@ -325,6 +350,19 @@ export class DebtService {
 
     patch.updatedAt = new Date().toISOString();
     db.updateDebt(debtId, patch);
+
+    // Enqueue sync for cloud
+    const updated = { ...existing, ...patch };
+    db.enqueueSync({
+      id: generateUUID(),
+      operation: 'UPDATE_DEBT',
+      entityType: 'DEBT',
+      entityId: debtId,
+      payload: updated,
+      status: 'PENDING',
+      createdAt: new Date().toISOString(),
+    });
+
     return true;
   }
 
