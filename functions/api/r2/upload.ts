@@ -34,10 +34,8 @@ export async function onRequestPost(context: any) {
       httpMetadata: { contentType: file.type },
     });
 
-    // Build full URL
-    const url = new URL(request.url);
-    const baseUrl = `${url.protocol}//${url.host}`;
-    const fullUrl = `${baseUrl}/api/r2/files/${key}`;
+    // Use custom R2 domain
+    const fullUrl = `https://m.diocres.jobsreport.online/${key}`;
 
     // Update database for seller avatars
     if (type === 'seller') {
