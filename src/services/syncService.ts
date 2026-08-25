@@ -1,4 +1,4 @@
-// src/services/syncService.ts (UPDATED WITH PURCHASE ITEMS)
+// src/services/syncService.ts (UPDATED WITH EXPENSES AND REAL-TIME SYNC)
 import { db } from '../db/storage';
 import { SyncQueueItem, User } from '../types';
 import { CloudflareApi } from './cloudflareApi';
