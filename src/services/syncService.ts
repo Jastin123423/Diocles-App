@@ -1,4 +1,4 @@
-// src/services/syncService.ts (UPDATED WITH EXPENSES AND REAL-TIME SYNC)
+// src/services/syncService.ts (UPDATED WITH DEBTS SYNC)
 import { db } from '../db/storage';
 import { SyncQueueItem, User } from '../types';
 import { CloudflareApi } from './cloudflareApi';
@@ -401,6 +401,47 @@ export class SyncService {
       });
       
       db.saveExpenses(mergedExpenses);
+    }
+
+    // Apply debts
+    if (cloudData.debts && cloudData.debts.length > 0) {
+      const localDebts = db.getDebts();
+      const mergedDebts = [...localDebts];
+      
+      cloudData.debts.forEach((cloudDebt: any) => {
+        const index = mergedDebts.findIndex(d => d.id === cloudDebt.id);
+        const debtData = {
+          id: cloudDebt.id,
+          type: cloudDebt.type,
+          debtorName: cloudDebt.debtor_name,
+          productDescription: cloudDebt.product_description,
+          amount: cloudDebt.amount,
+          paidAmount: cloudDebt.paid_amount,
+          remainingAmount: cloudDebt.remaining_amount,
+          payments: [],
+          dueDate: cloudDebt.due_date,
+          contact: cloudDebt.contact,
+          notes: cloudDebt.notes,
+          status: cloudDebt.status,
+          paidAt: cloudDebt.paid_at,
+          paidByUserId: cloudDebt.paid_by_user_id,
+          paidByName: cloudDebt.paid_by_name,
+          paymentNotes: cloudDebt.payment_notes,
+          createdByUserId: cloudDebt.created_by_user_id,
+          createdByName: cloudDebt.created_by_name,
+          shopId: cloudDebt.shop_id,
+          createdAt: cloudDebt.created_at,
+          updatedAt: cloudDebt.updated_at,
+        };
+        
+        if (index === -1) {
+          mergedDebts.push(debtData);
+        } else {
+          mergedDebts[index] = { ...mergedDebts[index], ...debtData };
+        }
+      });
+      
+      db.saveDebts(mergedDebts);
     }
 
     // Apply movements
