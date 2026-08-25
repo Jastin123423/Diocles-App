@@ -11,6 +11,7 @@ export interface User {
   color: string; // Hex or theme color key
   status: UserStatus;
   assignedShopIds?: string[]; // Multiple shop IDs assigned to this user
+  avatarUrl?: string; // URL to user's avatar image
   createdAt: string;
   updatedAt: string;
 }
@@ -399,4 +400,3 @@ export interface AppNotification {
   createdAt: string;
   readByUserIds: string[]; // List of user IDs who marked this notification as read
 }
-
