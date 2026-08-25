@@ -64,12 +64,13 @@ export class InventoryService {
     };
     db.saveMovements([movement, ...db.getMovements()]);
 
+    // FIXED: Include ALL movement data in sync payload
     db.enqueueSync({
       id: generateUUID(),
       operation: 'STOCK_ADJUSTMENT',
       entityType: 'INVENTORY',
-      entityId: prod.id,
-      payload: { productId, previousQty: prevQty, newQty: newQuantity, reason, shopId: prod.shopId, costValue, movementType },
+      entityId: movement.id,
+      payload: movement,
       status: 'PENDING',
       createdAt: new Date().toISOString(),
     });
