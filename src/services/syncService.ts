@@ -1,4 +1,4 @@
-// src/services/syncService.ts (UPDATED WITH PURCHASES)
+// src/services/syncService.ts (UPDATED WITH PURCHASE ITEMS)
 import { db } from '../db/storage';
 import { SyncQueueItem, User } from '../types';
 import { CloudflareApi } from './cloudflareApi';
@@ -328,6 +328,19 @@ export class SyncService {
       
       cloudData.purchases.forEach((cloudPurchase: any) => {
         const index = mergedPurchases.findIndex(p => p.id === cloudPurchase.id);
+        
+        // Find items for this purchase
+        const purchaseItems = (cloudData.purchaseItems || [])
+          .filter((item: any) => item.purchase_id === cloudPurchase.id)
+          .map((item: any) => ({
+            id: item.id,
+            productId: item.product_id,
+            productName: item.product_name,
+            quantity: item.quantity,
+            unitCost: item.unit_cost,
+            total: item.total,
+          }));
+        
         const purchaseData = {
           id: cloudPurchase.id,
           purchaseNumber: cloudPurchase.purchase_number,
@@ -342,7 +355,7 @@ export class SyncService {
           createdByUserId: cloudPurchase.created_by_user_id,
           createdByName: cloudPurchase.created_by_name,
           createdAt: cloudPurchase.created_at,
-          items: [],
+          items: purchaseItems,
         };
         
         if (index === -1) {
