@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState, useMemo } from '
 import { db, DatabaseState } from '../db/storage';
 import { AuthService } from '../services/authService';
 import { SyncService, SyncState } from '../services/syncService';
+import { CloudflareApi } from '../services/cloudflareApi';
 import { User, Sale, ToastMessage, Shop } from '../types';
 import { getColorOption } from '../utils/colors';
 
@@ -107,6 +108,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => unsubscribe();
   }, [currentUser]);
 
+  // AUTO-SYNC: Pull when online, work locally when offline
+  useEffect(() => {
+    const autoSync = async () => {
+      try {
+        // Check if online
+        const online = await CloudflareApi.checkConnection();
+        
+        if (online) {
+          console.log('[AutoSync] Online detected, syncing...');
+          
+          // 1. Push any pending local changes
+          const pendingCount = SyncService.getPendingCount();
+          if (pendingCount > 0) {
+            await SyncService.processSyncQueue(currentUser || undefined);
+          }
+          
+          // 2. Pull latest cloud data
+          const pullResult = await CloudflareApi.pullSync(
+            localStorage.getItem('omnibiz_last_synced_at') || undefined
+          );
+          
+          if (pullResult.success && pullResult.data) {
+            SyncService.applyCloudData(pullResult.data);
+            
+            // Update last synced timestamp
+            const now = new Date().toISOString();
+            localStorage.setItem('omnibiz_last_synced_at', now);
+            
+            // Update local state to reflect pulled data
+            const state = db.getState();
+            setDbState({ ...state });
+            setSyncStatus(SyncService.getSyncStatus());
+            
+            console.log('[AutoSync] Cloud data pulled successfully');
+          }
+        } else {
+          console.log('[AutoSync] Offline, using local data only');
+        }
+      } catch (error) {
+        console.log('[AutoSync] Error:', error);
+      }
+    };
+
+    // Run on mount
+    autoSync();
+
+    // Set interval to check every 60 seconds
+    const interval = setInterval(autoSync, 60000);
+
+    return () => clearInterval(interval);
+  }, [currentUser]);
+
   // Ensure seller has a valid shop selected
   useEffect(() => {
     if (!currentUser) return;
@@ -189,13 +242,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const triggerSync = async () => {
     setSyncStatus({ state: 'SYNCING', pendingCount: syncStatus.pendingCount });
-    const res = await SyncService.simulateServerSync();
+    
+    const res = await SyncService.processSyncQueue(currentUser || undefined);
+    
     setSyncStatus(SyncService.getSyncStatus());
+    
     if (res.success) {
       addToast({
         type: 'success',
         title: 'Synchronization Complete',
-        description: res.syncedCount > 0 ? `Synced ${res.syncedCount} queued records to server simulation.` : 'All local records are up to date.',
+        description: res.processedCount > 0 
+          ? `Synced ${res.processedCount} queued records to cloud.` 
+          : 'All local records are up to date with cloud.',
+      });
+    } else {
+      addToast({
+        type: 'warning',
+        title: 'Sync Status',
+        description: res.message || 'Sync completed.',
       });
     }
   };
