@@ -32,8 +32,24 @@ export async function onRequestGet(context: any) {
     const salesResult = await env.DB.prepare('SELECT * FROM sales WHERE created_at > ?').bind(since).all();
     state.sales = salesResult.results;
 
+    // Get sale items
+    const saleItemsResult = await env.DB.prepare(`
+      SELECT si.* FROM sale_items si
+      JOIN sales s ON si.sale_id = s.id
+      WHERE s.created_at > ?
+    `).bind(since).all();
+    state.saleItems = saleItemsResult.results;
+
     const purchasesResult = await env.DB.prepare('SELECT * FROM purchases WHERE created_at > ?').bind(since).all();
     state.purchases = purchasesResult.results;
+
+    // Get purchase items
+    const purchaseItemsResult = await env.DB.prepare(`
+      SELECT pi.* FROM purchase_items pi
+      JOIN purchases p ON pi.purchase_id = p.id
+      WHERE p.created_at > ?
+    `).bind(since).all();
+    state.purchaseItems = purchaseItemsResult.results;
 
     const expensesResult = await env.DB.prepare('SELECT * FROM expenses WHERE created_at > ?').bind(since).all();
     state.expenses = expensesResult.results;
