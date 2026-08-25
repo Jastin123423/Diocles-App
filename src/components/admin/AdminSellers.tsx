@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Users,
   UserPlus,
@@ -13,16 +13,20 @@ import {
   CheckCircle2,
   Lock,
   Store,
+  Camera,
+  Upload,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { SellerService } from '../../services/sellerService';
 import { AuthService } from '../../services/authService';
+import { StorageService } from '../../db/storage';
+import { CloudflareApi } from '../../services/cloudflareApi';
 import { User } from '../../types';
 import { SELLER_COLORS, getSellerColorById } from '../../utils/colors';
 import { formatDateTime } from '../../utils/formatters';
 
 export const AdminSellers: React.FC = () => {
-  const { currentUser, dbState, addToast } = useApp();
+  const { currentUser, dbState, addToast, refreshUser } = useApp();
 
   // Modals
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -42,10 +46,114 @@ export const AdminSellers: React.FC = () => {
   const [newAdminSetPass, setNewAdminSetPass] = useState('');
   const [passError, setPassError] = useState('');
 
+  // Avatar upload state
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const [uploadingSellerId, setUploadingSellerId] = useState<string | null>(null);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
   if (!currentUser || currentUser.role !== 'ADMIN') return null;
 
   const sellers = dbState.users.filter(u => u.role === 'SELLER');
   const allShops = dbState.shops || [];
+
+  // Helper to compress image
+  const compressImage = (file: File, maxWidth: number, maxHeight: number): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          
+          if (width > maxWidth) {
+            height = (maxWidth / width) * height;
+            width = maxWidth;
+          }
+          if (height > maxHeight) {
+            width = (maxHeight / height) * width;
+            height = maxHeight;
+          }
+          
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          
+          canvas.toBlob((blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error('Failed to compress image'));
+          }, 'image/jpeg', 0.8);
+        };
+        img.onerror = reject;
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleAvatarUpload = async (sellerId: string, file: File) => {
+    if (!file) return;
+
+    setUploadingSellerId(sellerId);
+    setIsUploadingAvatar(true);
+    
+    try {
+      // Compress image to 200x200
+      const compressed = await compressImage(file, 200, 200);
+      
+      // Upload to R2
+      const result = await CloudflareApi.uploadImage(compressed, 'seller', sellerId);
+      
+      if (result.success) {
+        // Update local user
+        const users = StorageService.getUsers();
+        const userIndex = users.findIndex(u => u.id === sellerId);
+        if (userIndex !== -1) {
+          users[userIndex].avatarUrl = result.url;
+          StorageService.saveUsers(users);
+          if (refreshUser) refreshUser();
+        }
+        
+        addToast({
+          type: 'success',
+          title: 'Profile Picture Updated',
+          description: 'Seller profile picture has been updated successfully.',
+        });
+      }
+    } catch (error: any) {
+      addToast({
+        type: 'error',
+        title: 'Upload Failed',
+        description: error.message || 'Could not upload profile picture.',
+      });
+    } finally {
+      setIsUploadingAvatar(false);
+      setUploadingSellerId(null);
+      // Reset file input
+      if (avatarInputRef.current) {
+        avatarInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleAvatarClick = (sellerId: string) => {
+    if (avatarInputRef.current) {
+      avatarInputRef.current.click();
+      // Store seller ID for the upload handler
+      avatarInputRef.current.dataset.sellerId = sellerId;
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const sellerId = e.target.dataset.sellerId;
+    if (file && sellerId) {
+      handleAvatarUpload(sellerId, file);
+    }
+  };
 
   const openAddModal = () => {
     setName('');
@@ -191,6 +299,15 @@ export const AdminSellers: React.FC = () => {
 
   return (
     <div id="admin-sellers-view" className="flex-1 p-6 bg-slate-950 text-slate-100 overflow-y-auto space-y-6">
+      {/* Hidden file input for avatar uploads */}
+      <input
+        ref={avatarInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileChange}
+        className="hidden"
+      />
+
       {/* Header */}
       <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
         <div>
@@ -244,12 +361,38 @@ export const AdminSellers: React.FC = () => {
               <div>
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div className="flex items-center gap-3">
-                    <div
-                      className="w-12 h-12 rounded-xl flex items-center justify-center font-bold text-lg text-white shadow"
-                      style={{ backgroundColor: colorObj.primary }}
-                    >
-                      {seller.name.charAt(0).toUpperCase()}
+                    {/* Avatar with upload button */}
+                    <div className="relative group">
+                      {seller.avatarUrl ? (
+                        <img 
+                          src={seller.avatarUrl} 
+                          alt={seller.name} 
+                          className="w-12 h-12 rounded-xl object-cover shadow"
+                        />
+                      ) : (
+                        <div
+                          className="w-12 h-12 rounded-xl flex items-center justify-center font-bold text-lg text-white shadow"
+                          style={{ backgroundColor: colorObj.primary }}
+                        >
+                          {seller.name.charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      
+                      {/* Upload button overlay */}
+                      <button
+                        onClick={() => handleAvatarClick(seller.id)}
+                        disabled={isUploadingAvatar && uploadingSellerId === seller.id}
+                        className="absolute inset-0 flex items-center justify-center rounded-xl bg-slate-950/60 opacity-0 group-hover:opacity-100 transition-opacity disabled:opacity-50"
+                        title="Upload profile picture"
+                      >
+                        {isUploadingAvatar && uploadingSellerId === seller.id ? (
+                          <Upload className="w-4 h-4 text-white animate-pulse" />
+                        ) : (
+                          <Camera className="w-4 h-4 text-white" />
+                        )}
+                      </button>
                     </div>
+                    
                     <div>
                       <h3 className="font-bold text-white text-sm">{seller.name}</h3>
                       <p className="text-xs text-slate-400 font-mono">@{seller.username}</p>
