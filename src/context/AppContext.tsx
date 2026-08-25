@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
 import { db, DatabaseState } from '../db/storage';
 import { AuthService } from '../services/authService';
 import { SyncService, SyncState } from '../services/syncService';
@@ -47,6 +47,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const saved = localStorage.getItem('diocres_selected_shop_id');
     return saved || 'ALL';
   });
+  
+  const isSyncingRef = useRef<boolean>(false);
 
   const setSelectedShopId = (shopId: string) => {
     setSelectedShopIdState(shopId);
@@ -108,15 +110,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => unsubscribe();
   }, [currentUser]);
 
-  // AUTO-SYNC: Pull when online, work locally when offline
+  // LIVE SYNC: Continuous sync every 5 seconds when online
   useEffect(() => {
-    const autoSync = async () => {
+    const liveSync = async () => {
+      // Prevent overlapping syncs
+      if (isSyncingRef.current) return;
+      
       try {
         // Check if online
         const online = await CloudflareApi.checkConnection();
         
         if (online) {
-          console.log('[AutoSync] Online detected, syncing...');
+          isSyncingRef.current = true;
           
           // 1. Push any pending local changes
           const pendingCount = SyncService.getPendingCount();
@@ -140,24 +145,53 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const state = db.getState();
             setDbState({ ...state });
             setSyncStatus(SyncService.getSyncStatus());
-            
-            console.log('[AutoSync] Cloud data pulled successfully');
           }
+          
+          isSyncingRef.current = false;
         } else {
-          console.log('[AutoSync] Offline, using local data only');
+          console.log('[LiveSync] Offline, using local data only');
         }
       } catch (error) {
-        console.log('[AutoSync] Error:', error);
+        console.log('[LiveSync] Error:', error);
+        isSyncingRef.current = false;
       }
     };
 
-    // Run on mount
-    autoSync();
+    // Run immediately on mount
+    liveSync();
 
-    // Set interval to check every 60 seconds
-    const interval = setInterval(autoSync, 60000);
+    // Set interval to sync every 5 seconds for live updates
+    const interval = setInterval(liveSync, 5000);
 
     return () => clearInterval(interval);
+  }, [currentUser]);
+
+  // Listen for online/offline events for immediate sync
+  useEffect(() => {
+    const handleOnline = () => {
+      console.log('[LiveSync] Connection restored, syncing immediately...');
+      // Trigger sync when back online
+      if (currentUser) {
+        SyncService.processSyncQueue(currentUser).then(() => {
+          const state = db.getState();
+          setDbState({ ...state });
+          setSyncStatus(SyncService.getSyncStatus());
+        });
+      }
+    };
+
+    const handleOffline = () => {
+      console.log('[LiveSync] Connection lost, switching to offline mode');
+      setSyncStatus({ state: 'OFFLINE_LOCAL', pendingCount: SyncService.getPendingCount() });
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
   }, [currentUser]);
 
   // Ensure seller has a valid shop selected
