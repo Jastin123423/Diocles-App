@@ -126,7 +126,7 @@ export const SellerSales: React.FC = () => {
               <tr className="border-b border-slate-800 bg-slate-950/60 text-slate-400">
                 <th className="py-3 px-4 font-semibold">Receipt Number</th>
                 <th className="py-3 px-4 font-semibold">Date & Time</th>
-                <th className="py-3 px-4 font-semibold">Items Sold</th>
+                <th className="py-3 px-4 font-semibold">Products Sold</th>
                 <th className="py-3 px-4 font-semibold">Payment Method</th>
                 <th className="py-3 px-4 font-semibold">Status</th>
                 <th className="py-3 px-4 text-right font-semibold">Amount Paid</th>
@@ -148,10 +148,17 @@ export const SellerSales: React.FC = () => {
                       {sale.receiptNumber}
                     </td>
                     <td className="py-3.5 px-4 text-slate-400">{formatDateTime(sale.createdAt)}</td>
-                    <td className="py-3.5 px-4 text-slate-300">
-                      <div className="font-medium">{(sale.items || []).length} items</div>
-                      <div className="text-[10px] text-slate-500 truncate max-w-[220px]">
-                        {(sale.items || []).map(i => `${i.quantity}x ${i.productName}`).join(', ')}
+                    <td className="py-3.5 px-4 max-w-xs">
+                      <div className="flex flex-wrap gap-1">
+                        {(sale.items || []).map((item, idx) => (
+                          <span
+                            key={idx}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700/60 text-[11px] text-slate-200"
+                          >
+                            <span className="font-bold text-blue-400">{item.quantity}x</span>
+                            <span className="truncate max-w-[100px]">{item.productName}</span>
+                          </span>
+                        ))}
                       </div>
                     </td>
                     <td className="py-3.5 px-4">
