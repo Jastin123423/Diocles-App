@@ -99,16 +99,26 @@ export const Header: React.FC = () => {
       {/* Main App Bar */}
       <div className="flex items-center justify-between px-4 py-2.5">
         <div className="flex items-center gap-3">
-          <div
-            className="w-9 h-9 rounded-lg flex items-center justify-center font-bold text-white shadow-sm transition-colors"
-            style={{ backgroundColor: currentUser?.role === 'ADMIN' ? '#334155' : sellerColor.primary }}
-          >
-            {currentUser?.role === 'ADMIN' ? (
-              <Shield className="w-5 h-5" />
-            ) : (
-              currentUser?.name.charAt(0).toUpperCase() || 'S'
-            )}
-          </div>
+          {/* Avatar with fallback to initial or shield for admin */}
+          {currentUser?.avatarUrl ? (
+            <img 
+              src={currentUser.avatarUrl} 
+              alt={currentUser.name} 
+              className="w-9 h-9 rounded-lg object-cover shadow-sm"
+              style={{ border: `2px solid ${currentUser.role === 'ADMIN' ? '#334155' : sellerColor.primary}` }}
+            />
+          ) : (
+            <div
+              className="w-9 h-9 rounded-lg flex items-center justify-center font-bold text-white shadow-sm transition-colors"
+              style={{ backgroundColor: currentUser?.role === 'ADMIN' ? '#334155' : sellerColor.primary }}
+            >
+              {currentUser?.role === 'ADMIN' ? (
+                <Shield className="w-5 h-5" />
+              ) : (
+                currentUser?.name.charAt(0).toUpperCase() || 'S'
+              )}
+            </div>
+          )}
           <div>
             <div className="flex items-center gap-2">
               <h1 className="font-semibold text-sm text-white tracking-tight">
@@ -304,7 +314,7 @@ export const Header: React.FC = () => {
           <button
             id="sync-status-button"
             onClick={triggerSync}
-            title="Click to simulate synchronization with server"
+            title="Click to synchronize with server"
             className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-slate-800/90 hover:bg-slate-800 text-xs font-medium border border-slate-700 transition"
           >
             {syncStatus.state === 'SYNCING' ? (
