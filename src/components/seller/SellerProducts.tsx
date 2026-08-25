@@ -36,6 +36,7 @@ export const SellerProducts: React.FC = () => {
   const [unit, setUnit] = useState('pcs');
   const [productImages, setProductImages] = useState<ProductImage[]>([]);
   const [formError, setFormError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
 
   // Image Viewer Modal State
   const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
@@ -56,62 +57,74 @@ export const SellerProducts: React.FC = () => {
     status: 'ACTIVE',
   });
 
-  const handleCreateProduct = (e: React.FormEvent) => {
+  const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     setFormError('');
+    setIsSaving(true);
 
     if (!name.trim()) {
       setFormError('Product name is required.');
+      setIsSaving(false);
       return;
     }
 
     const price = parseFloat(sellingPrice);
     if (isNaN(price) || price < 0) {
       setFormError('Please enter a valid selling price.');
+      setIsSaving(false);
       return;
     }
 
     const costPrice = parseFloat(purchasePrice) || 0;
 
-    if (!currentUser) return;
+    if (!currentUser) {
+      setIsSaving(false);
+      return;
+    }
 
     const firstActiveCat = shopCategories.find(c => c.status !== 'INACTIVE');
 
-    const result = ProductService.createProduct(
-      {
-        shopId: targetShopId,
-        name,
-        sku: sku.trim() || undefined,
-        barcode: barcode.trim() || undefined,
-        categoryId: categoryId || firstActiveCat?.id || shopCategories[0]?.id || allCategories[0]?.id || 'cat-hardware',
-        purchasePrice: costPrice,
-        sellingPrice: price,
-        currentStock: parseInt(currentStock, 10) || 0,
-        minStock: parseInt(minStock, 10) || 5,
-        unit,
-        images: productImages,
-      },
-      currentUser
-    );
+    try {
+      const result = await ProductService.createProduct(
+        {
+          shopId: targetShopId,
+          name,
+          sku: sku.trim() || undefined,
+          barcode: barcode.trim() || undefined,
+          categoryId: categoryId || firstActiveCat?.id || shopCategories[0]?.id || allCategories[0]?.id || 'cat-hardware',
+          purchasePrice: costPrice,
+          sellingPrice: price,
+          currentStock: parseInt(currentStock, 10) || 0,
+          minStock: parseInt(minStock, 10) || 5,
+          unit,
+          images: productImages,
+        },
+        currentUser
+      );
 
-    if (result.success) {
-      addToast({
-        type: 'success',
-        title: 'Product Added',
-        description: `'${name}' has been added to catalog and saved locally.`,
-      });
-      setShowAddModal(false);
-      // Reset form
-      setName('');
-      setSku('');
-      setBarcode('');
-      setPurchasePrice('');
-      setSellingPrice('');
-      setCurrentStock('0');
-      setMinStock('5');
-      setProductImages([]);
-    } else {
-      setFormError(result.error || 'Failed to create product.');
+      if (result.success) {
+        addToast({
+          type: 'success',
+          title: 'Product Added',
+          description: `'${name}' has been added to catalog and saved locally.`,
+        });
+        setShowAddModal(false);
+        // Reset form
+        setName('');
+        setSku('');
+        setBarcode('');
+        setPurchasePrice('');
+        setSellingPrice('');
+        setCurrentStock('0');
+        setMinStock('5');
+        setProductImages([]);
+      } else {
+        setFormError(result.error || 'Failed to create product.');
+      }
+    } catch (error: any) {
+      setFormError(error.message || 'An error occurred while saving product.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -444,9 +457,10 @@ export const SellerProducts: React.FC = () => {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow transition"
+                  disabled={isSaving}
+                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow transition disabled:opacity-50"
                 >
-                  Save Product to Catalog
+                  {isSaving ? 'Saving...' : 'Save Product to Catalog'}
                 </button>
               </div>
             </form>
