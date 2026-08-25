@@ -151,9 +151,9 @@ async function upsertProduct(db: any, product: any) {
     INSERT INTO products (
       id, shop_id, name, sku, barcode, category_id,
       selling_price, proposed_selling_price, purchase_price,
-      current_stock, min_stock, unit, status, created_at, updated_at
+      current_stock, min_stock, unit, status, image_url, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       shop_id = excluded.shop_id,
       name = excluded.name,
@@ -167,14 +167,56 @@ async function upsertProduct(db: any, product: any) {
       min_stock = excluded.min_stock,
       unit = excluded.unit,
       status = excluded.status,
+      image_url = excluded.image_url,
       updated_at = excluded.updated_at
   `).bind(
     product.id, product.shopId, product.name, product.sku, product.barcode || null,
     product.categoryId, product.sellingPrice || 0, product.proposedSellingPrice || null,
     product.purchasePrice || 0, product.currentStock || 0, product.minStock || 5,
     product.unit || 'pcs', product.status || 'ACTIVE',
+    product.imageUrl || product.image_url || null,
     product.createdAt || new Date().toISOString(), product.updatedAt || new Date().toISOString()
   ).run();
+
+  // Save product images to product_images table
+  if (product.images && Array.isArray(product.images) && product.images.length > 0) {
+    for (let i = 0; i < product.images.length; i++) {
+      const img = product.images[i];
+      
+      await db.prepare(`
+        INSERT INTO product_images (
+          image_id, product_id, image_order, version, r2_key,
+          filename, mime_type, file_size, width, height, hash,
+          sync_status, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(image_id) DO UPDATE SET
+          image_order = excluded.image_order,
+          version = excluded.version,
+          r2_key = excluded.r2_key,
+          filename = excluded.filename,
+          mime_type = excluded.mime_type,
+          file_size = excluded.file_size,
+          sync_status = excluded.sync_status,
+          updated_at = excluded.updated_at
+      `).bind(
+        img.imageId || crypto.randomUUID(),
+        product.id,
+        img.imageOrder !== undefined ? img.imageOrder : i,
+        img.version || 1,
+        img.dataUrl || img.thumbnailUrl || img.r2_key || null,
+        img.filename || null,
+        img.mimeType || 'image/jpeg',
+        img.fileSize || 0,
+        img.width || null,
+        img.height || null,
+        img.hash || null,
+        img.syncStatus || 'SYNCED',
+        img.createdAt || new Date().toISOString(),
+        img.updatedAt || new Date().toISOString()
+      ).run();
+    }
+  }
 }
 
 async function upsertCategory(db: any, category: any) {
@@ -290,9 +332,9 @@ async function upsertUser(db: any, user: any) {
   await db.prepare(`
     INSERT INTO users (
       id, username, name, role, password_hash, color, status,
-      assigned_shop_ids, created_at, updated_at
+      assigned_shop_ids, avatar_url, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       username = excluded.username,
       name = excluded.name,
@@ -301,6 +343,7 @@ async function upsertUser(db: any, user: any) {
       color = excluded.color,
       status = excluded.status,
       assigned_shop_ids = excluded.assigned_shop_ids,
+      avatar_url = excluded.avatar_url,
       updated_at = excluded.updated_at
   `).bind(
     user.id, 
@@ -311,6 +354,7 @@ async function upsertUser(db: any, user: any) {
     user.color || 'blue', 
     user.status || 'ACTIVE',
     JSON.stringify(user.assignedShopIds || []),
+    user.avatarUrl || user.avatar_url || null,
     user.createdAt || new Date().toISOString(), 
     user.updatedAt || new Date().toISOString()
   ).run();
