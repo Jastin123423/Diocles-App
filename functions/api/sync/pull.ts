@@ -1,3 +1,4 @@
+// functions/api/sync/pull.ts (CONFIRMED WITH SALE ITEMS)
 export async function onRequestOptions() {
   return new Response(null, {
     headers: {
@@ -32,7 +33,7 @@ export async function onRequestGet(context: any) {
     const salesResult = await env.DB.prepare('SELECT * FROM sales WHERE created_at > ?').bind(since).all();
     state.sales = salesResult.results;
 
-    // Get sale items
+    // Get sale items - THIS IS CRITICAL
     const saleItemsResult = await env.DB.prepare(`
       SELECT si.* FROM sale_items si
       JOIN sales s ON si.sale_id = s.id
