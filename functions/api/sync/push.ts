@@ -110,6 +110,14 @@ async function processOperation(db: any, op: any) {
       await updateSettings(db, payload);
       break;
     
+    case 'CREATE_DEBT':
+      await createDebt(db, payload);
+      break;
+    
+    case 'UPDATE_DEBT':
+      await updateDebt(db, payload);
+      break;
+    
     default:
       throw new Error(`Unknown operation: ${operation}`);
   }
@@ -330,7 +338,6 @@ async function recordStockAdjustment(db: any, movement: any) {
   `).bind(movement.newQty, new Date().toISOString(), movement.productId).run();
 }
 
-// NEW: Update settings function
 async function updateSettings(db: any, settings: any) {
   await db.prepare(`
     UPDATE settings SET
@@ -364,5 +371,58 @@ async function updateSettings(db: any, settings: any) {
     settings.receiptPaperWidth || '80mm',
     settings.lowStockThresholdDefault || 5,
     new Date().toISOString()
+  ).run();
+}
+
+async function createDebt(db: any, debt: any) {
+  await db.prepare(`
+    INSERT INTO debts (
+      id, type, debtor_name, product_description, amount, paid_amount,
+      remaining_amount, due_date, contact, notes, status,
+      created_by_user_id, created_by_name, shop_id, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      type = excluded.type,
+      debtor_name = excluded.debtor_name,
+      product_description = excluded.product_description,
+      amount = excluded.amount,
+      paid_amount = excluded.paid_amount,
+      remaining_amount = excluded.remaining_amount,
+      due_date = excluded.due_date,
+      contact = excluded.contact,
+      notes = excluded.notes,
+      status = excluded.status,
+      updated_at = excluded.updated_at
+  `).bind(
+    debt.id, debt.type, debt.debtorName, debt.productDescription || null,
+    debt.amount || 0, debt.paidAmount || 0, debt.remainingAmount || debt.amount || 0,
+    debt.dueDate || null, debt.contact || null, debt.notes || null,
+    debt.status || 'PENDING', debt.createdByUserId, debt.createdByName,
+    debt.shopId || null, debt.createdAt || new Date().toISOString(),
+    debt.updatedAt || new Date().toISOString()
+  ).run();
+}
+
+async function updateDebt(db: any, debt: any) {
+  await db.prepare(`
+    UPDATE debts SET
+      type = ?,
+      debtor_name = ?,
+      product_description = ?,
+      amount = ?,
+      paid_amount = ?,
+      remaining_amount = ?,
+      due_date = ?,
+      contact = ?,
+      notes = ?,
+      status = ?,
+      updated_at = ?
+    WHERE id = ?
+  `).bind(
+    debt.type, debt.debtorName, debt.productDescription || null,
+    debt.amount || 0, debt.paidAmount || 0, debt.remainingAmount || 0,
+    debt.dueDate || null, debt.contact || null, debt.notes || null,
+    debt.status || 'PENDING', new Date().toISOString(), debt.id
   ).run();
 }
