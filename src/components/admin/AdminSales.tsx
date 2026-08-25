@@ -216,7 +216,7 @@ export const AdminSales: React.FC = () => {
                 <th className="py-3 px-4 font-semibold">Receipt Number</th>
                 <th className="py-3 px-4 font-semibold">Date & Time</th>
                 <th className="py-3 px-4 font-semibold">Seller</th>
-                <th className="py-3 px-4 font-semibold">Items</th>
+                <th className="py-3 px-4 font-semibold">Products Sold</th>
                 <th className="py-3 px-4 font-semibold">Payment</th>
                 <th className="py-3 px-4 text-right font-semibold">COGS</th>
                 <th className="py-3 px-4 text-right font-semibold">Total Revenue</th>
@@ -244,8 +244,19 @@ export const AdminSales: React.FC = () => {
                       </td>
                       <td className="py-3 px-4 text-slate-400">{formatDateTime(sale.createdAt)}</td>
                       <td className="py-3 px-4 text-slate-300 font-medium">{sale.sellerName}</td>
-                      <td className="py-3 px-4 text-slate-400">
-                        <span>{(sale.items || []).length} item(s)</span>
+                      <td className="py-3 px-4 max-w-xs">
+                        <div className="flex flex-wrap gap-1">
+                          {(sale.items || []).map((item, idx) => (
+                            <span
+                              key={idx}
+                              className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700/60 text-[11px] text-slate-200"
+                              title={`${item.quantity}x ${item.productName} @ ${formatCurrency(item.unitPrice, settings.currencySymbol)}`}
+                            >
+                              <span className="font-bold text-blue-400">{item.quantity}x</span>
+                              <span className="truncate max-w-[120px]">{item.productName}</span>
+                            </span>
+                          ))}
+                        </div>
                       </td>
                       <td className="py-3 px-4">
                         <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[10px] uppercase font-medium">
