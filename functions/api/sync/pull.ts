@@ -32,11 +32,17 @@ export async function onRequestGet(context: any) {
     const salesResult = await env.DB.prepare('SELECT * FROM sales WHERE created_at > ?').bind(since).all();
     state.sales = salesResult.results;
 
+    const purchasesResult = await env.DB.prepare('SELECT * FROM purchases WHERE created_at > ?').bind(since).all();
+    state.purchases = purchasesResult.results;
+
     const expensesResult = await env.DB.prepare('SELECT * FROM expenses WHERE created_at > ?').bind(since).all();
     state.expenses = expensesResult.results;
 
     const movementsResult = await env.DB.prepare('SELECT * FROM inventory_movements WHERE created_at > ?').bind(since).all();
     state.movements = movementsResult.results;
+
+    const debtsResult = await env.DB.prepare('SELECT * FROM debts WHERE updated_at > ?').bind(since).all();
+    state.debts = debtsResult.results;
 
     const settingsResult = await env.DB.prepare('SELECT * FROM settings WHERE id = ?').bind('global').first();
     state.settings = settingsResult;
