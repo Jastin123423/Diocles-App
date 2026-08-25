@@ -74,6 +74,7 @@ export class SellerService {
 
     db.saveUsers([...users, newSeller]);
 
+    // Sync payload includes passwordHash for cloud login
     db.enqueueSync({
       id: generateUUID(),
       operation: 'CREATE_SELLER',
@@ -83,9 +84,13 @@ export class SellerService {
         id: newSeller.id,
         username: newSeller.username,
         name: newSeller.name,
+        role: newSeller.role,
+        passwordHash: newSeller.passwordHash,
         color: newSeller.color,
         status: newSeller.status,
         assignedShopIds: newSeller.assignedShopIds,
+        createdAt: newSeller.createdAt,
+        updatedAt: newSeller.updatedAt,
       },
       status: 'PENDING',
       createdAt: new Date().toISOString(),
@@ -151,6 +156,7 @@ export class SellerService {
     users[index] = seller;
     db.saveUsers(users);
 
+    // Sync payload includes passwordHash to preserve it
     db.enqueueSync({
       id: generateUUID(),
       operation: 'UPDATE_SELLER',
@@ -158,10 +164,15 @@ export class SellerService {
       entityId: seller.id,
       payload: {
         id: seller.id,
+        username: seller.username,
         name: seller.name,
+        role: seller.role,
+        passwordHash: seller.passwordHash,
         color: seller.color,
         status: seller.status,
         assignedShopIds: seller.assignedShopIds,
+        createdAt: seller.createdAt,
+        updatedAt: seller.updatedAt,
       },
       status: 'PENDING',
       createdAt: new Date().toISOString(),
@@ -208,6 +219,28 @@ export class SellerService {
     user.color = color;
     user.updatedAt = new Date().toISOString();
     db.saveUsers(users);
+
+    // Sync color update to cloud
+    db.enqueueSync({
+      id: generateUUID(),
+      operation: 'UPDATE_SELLER',
+      entityType: 'SELLER',
+      entityId: user.id,
+      payload: {
+        id: user.id,
+        username: user.username,
+        name: user.name,
+        role: user.role,
+        passwordHash: user.passwordHash,
+        color: user.color,
+        status: user.status,
+        assignedShopIds: user.assignedShopIds,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      },
+      status: 'PENDING',
+      createdAt: new Date().toISOString(),
+    });
 
     return { success: true };
   }
