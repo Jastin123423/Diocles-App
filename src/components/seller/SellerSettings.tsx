@@ -1,8 +1,10 @@
-import React, { useState } from 'react';
-import { Palette, KeyRound, Check, Lock, ShieldCheck, User } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Palette, KeyRound, Check, Lock, ShieldCheck, User, Camera, Upload } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { SellerService } from '../../services/sellerService';
 import { AuthService } from '../../services/authService';
+import { CloudflareApi } from '../../services/cloudflareApi';
+import { db } from '../../db/storage';
 import { SELLER_COLORS } from '../../utils/colors';
 
 export const SellerSettings: React.FC = () => {
@@ -16,7 +18,93 @@ export const SellerSettings: React.FC = () => {
   const [passwordSuccess, setPasswordSuccess] = useState(false);
   const [isChangingPass, setIsChangingPass] = useState(false);
 
+  // Avatar upload state
+  const [isUploadingAvatar, setIsUploadingAvatar] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement>(null);
+
   if (!currentUser) return null;
+
+  // Helper to compress image
+  const compressImage = (file: File, maxWidth: number, maxHeight: number): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          
+          if (width > maxWidth) {
+            height = (maxWidth / width) * height;
+            width = maxWidth;
+          }
+          if (height > maxHeight) {
+            width = (maxHeight / height) * width;
+            height = maxHeight;
+          }
+          
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          
+          canvas.toBlob((blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error('Failed to compress image'));
+          }, 'image/jpeg', 0.8);
+        };
+        img.onerror = reject;
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser) return;
+
+    setIsUploadingAvatar(true);
+    
+    try {
+      // Compress image to 200x200
+      const compressed = await compressImage(file, 200, 200);
+      
+      // Upload to R2
+      const result = await CloudflareApi.uploadImage(compressed, 'seller', currentUser.id);
+      
+      if (result.success) {
+        // Update local user
+        const users = db.getUsers();
+        const userIndex = users.findIndex(u => u.id === currentUser.id);
+        if (userIndex !== -1) {
+          users[userIndex].avatarUrl = result.url;
+          db.saveUsers(users);
+          refreshUser();
+        }
+        
+        addToast({
+          type: 'success',
+          title: 'Profile Picture Updated',
+          description: 'Your profile picture has been updated successfully.',
+        });
+      }
+    } catch (error: any) {
+      addToast({
+        type: 'error',
+        title: 'Upload Failed',
+        description: error.message || 'Could not upload profile picture.',
+      });
+    } finally {
+      setIsUploadingAvatar(false);
+      // Reset file input
+      if (avatarInputRef.current) {
+        avatarInputRef.current.value = '';
+      }
+    }
+  };
 
   const handleColorChange = (colorId: string) => {
     const res = SellerService.updateSellerColor(currentUser.id, colorId, currentUser);
@@ -84,15 +172,51 @@ export const SellerSettings: React.FC = () => {
       </div>
 
       <div className="max-w-3xl space-y-6">
-        {/* Profile Card */}
+        {/* Hidden file input for avatar */}
+        <input
+          ref={avatarInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleAvatarUpload}
+          className="hidden"
+        />
+
+        {/* Profile Card with Avatar Upload */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <div
-              className="w-14 h-14 rounded-2xl flex items-center justify-center font-bold text-xl text-white shadow-lg"
-              style={{ backgroundColor: sellerColor.primary }}
-            >
-              {currentUser.name.charAt(0).toUpperCase()}
+            {/* Avatar with upload button */}
+            <div className="relative group">
+              {currentUser.avatarUrl ? (
+                <img 
+                  src={currentUser.avatarUrl} 
+                  alt={currentUser.name} 
+                  className="w-14 h-14 rounded-2xl object-cover shadow-lg"
+                  style={{ border: `2px solid ${sellerColor.primary}` }}
+                />
+              ) : (
+                <div
+                  className="w-14 h-14 rounded-2xl flex items-center justify-center font-bold text-xl text-white shadow-lg"
+                  style={{ backgroundColor: sellerColor.primary }}
+                >
+                  {currentUser.name.charAt(0).toUpperCase()}
+                </div>
+              )}
+              
+              {/* Upload button overlay */}
+              <button
+                onClick={() => avatarInputRef.current?.click()}
+                disabled={isUploadingAvatar}
+                className="absolute -bottom-1 -right-1 p-1.5 rounded-full bg-blue-600 hover:bg-blue-500 text-white shadow-lg transition disabled:opacity-50"
+                title="Upload profile picture"
+              >
+                {isUploadingAvatar ? (
+                  <Upload className="w-3.5 h-3.5 animate-pulse" />
+                ) : (
+                  <Camera className="w-3.5 h-3.5" />
+                )}
+              </button>
             </div>
+            
             <div>
               <h3 className="text-base font-bold text-white">{currentUser.name}</h3>
               <p className="text-xs text-slate-400">@{currentUser.username} • Active Seller Account</p>
@@ -104,6 +228,16 @@ export const SellerSettings: React.FC = () => {
               </div>
             </div>
           </div>
+          
+          {/* Upload button (text) */}
+          <button
+            onClick={() => avatarInputRef.current?.click()}
+            disabled={isUploadingAvatar}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium transition disabled:opacity-50"
+          >
+            <Camera className="w-3.5 h-3.5" />
+            <span>{isUploadingAvatar ? 'Uploading...' : 'Change Photo'}</span>
+          </button>
         </div>
 
         {/* Account Color Palette Picker (Requirement #7) */}
