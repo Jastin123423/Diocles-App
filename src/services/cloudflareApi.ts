@@ -1,14 +1,14 @@
-// src/services/cloudflareApi.ts (COMPLETE VERSION)
+// src/services/cloudflareApi.ts (COMPLETE VERSION WITH R2 CUSTOM DOMAIN)
 export interface CloudflareConfig {
   baseUrl: string;
   deviceId: string;
 }
 
 export class CloudflareApi {
-private static config: CloudflareConfig = {
-  baseUrl: 'https://diocres.jobsreport.online',
-  deviceId: '',
-};
+  private static config: CloudflareConfig = {
+    baseUrl: 'https://diocres.jobsreport.online',
+    deviceId: '',
+  };
   
   private static token: string | null = localStorage.getItem('omnibiz_auth_token');
 
@@ -22,6 +22,10 @@ private static config: CloudflareConfig = {
 
   static getBaseUrl(): string {
     return this.config.baseUrl;
+  }
+
+  static getR2BaseUrl(): string {
+    return 'https://m.diocres.jobsreport.online';
   }
 
   static setToken(token: string): void {
@@ -400,11 +404,6 @@ private static config: CloudflareConfig = {
   // R2 FILE OPERATIONS
   // ==========================================
   
-  // Get custom R2 domain for serving files
-  static getR2BaseUrl(): string {
-    return 'https://m.diocres.jobsreport.online';
-  }
-
   // Upload product or seller image to R2
   static async uploadImage(
     file: File | Blob,
@@ -439,19 +438,19 @@ private static config: CloudflareConfig = {
     
     // Ensure URL uses custom R2 domain
     if (result.url && !result.url.includes('m.diocres.jobsreport.online')) {
-      result.url = `${this.getR2BaseUrl()}/${result.key}`;
+      result.url = `https://m.diocres.jobsreport.online/${result.key}`;
     }
     
     return result;
   }
 
-  // Upload product image to R2 (legacy method - kept for backward compatibility)
+  // Upload product image to R2 (legacy method)
   static async uploadFile(
     file: File | Blob,
     productId: string,
     imageOrder: number
   ): Promise<{ success: boolean; key: string; size: number; mimeType: string }> {
-    return this.uploadImage(file, 'product', productId, imageOrder) as Promise<{ success: boolean; key: string; size: number; mimeType: string }>;
+    return this.uploadImage(file, 'product', productId, imageOrder) as any;
   }
 
   // Upload backup to R2
@@ -479,9 +478,9 @@ private static config: CloudflareConfig = {
     return await response.json();
   }
 
-  // Get R2 file URL with custom domain
+  // Get R2 file URL (using custom domain)
   static getFileUrl(key: string): string {
-    return `${this.getR2BaseUrl()}/${key}`;
+    return `https://m.diocres.jobsreport.online/${key}`;
   }
 
   // Delete R2 file
@@ -494,3 +493,4 @@ private static config: CloudflareConfig = {
     const result = await this.request('/r2/backups');
     return result.backups || [];
   }
+}
