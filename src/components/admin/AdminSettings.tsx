@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   Sliders,
   Store,
@@ -9,14 +9,18 @@ import {
   History,
   Check,
   AlertCircle,
+  Camera,
+  Upload,
+  X,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { AuthService } from '../../services/authService';
 import { StorageService } from '../../db/storage';
+import { CloudflareApi } from '../../services/cloudflareApi';
 import { formatDateTime } from '../../utils/formatters';
 
 export const AdminSettings: React.FC = () => {
-  const { currentUser, dbState, addToast, updateSettings } = useApp();
+  const { currentUser, dbState, addToast, updateSettings, updateUser, refreshUser } = useApp();
 
   // Settings Form
   const [businessName, setBusinessName] = useState(dbState.settings.businessName);
@@ -38,7 +42,117 @@ export const AdminSettings: React.FC = () => {
   const [passwordError, setPasswordError] = useState('');
   const [isChangingPass, setIsChangingPass] = useState(false);
 
+  // Avatar upload state
+  const [avatarUrl, setAvatarUrl] = useState<string | undefined>(currentUser?.avatarUrl);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   if (!currentUser || currentUser.role !== 'ADMIN') return null;
+
+  // Helper to compress image
+  const compressImage = (file: File, maxWidth: number, maxHeight: number): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          
+          if (width > maxWidth) {
+            height = (maxWidth / width) * height;
+            width = maxWidth;
+          }
+          if (height > maxHeight) {
+            width = (maxHeight / height) * width;
+            height = maxHeight;
+          }
+          
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          
+          canvas.toBlob((blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error('Failed to compress image'));
+          }, 'image/jpeg', 0.8);
+        };
+        img.onerror = reject;
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser) return;
+
+    setIsUploading(true);
+    
+    try {
+      // Compress image to 200x200
+      const compressed = await compressImage(file, 200, 200);
+      
+      // Upload to R2
+      const result = await CloudflareApi.uploadImage(compressed, 'seller', currentUser.id);
+      
+      if (result.success) {
+        setAvatarUrl(result.url);
+        
+        // Update local user
+        const users = StorageService.getUsers();
+        const userIndex = users.findIndex(u => u.id === currentUser.id);
+        if (userIndex !== -1) {
+          users[userIndex].avatarUrl = result.url;
+          StorageService.saveUsers(users);
+          if (refreshUser) refreshUser();
+        }
+        
+        addToast({
+          type: 'success',
+          title: 'Profile Picture Updated',
+          description: 'Your admin profile picture has been updated successfully.',
+        });
+      }
+    } catch (error: any) {
+      addToast({
+        type: 'error',
+        title: 'Upload Failed',
+        description: error.message || 'Could not upload profile picture.',
+      });
+    } finally {
+      setIsUploading(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+    }
+  };
+
+  const handleRemoveAvatar = () => {
+    if (!currentUser) return;
+    
+    setAvatarUrl(undefined);
+    
+    // Update local user
+    const users = StorageService.getUsers();
+    const userIndex = users.findIndex(u => u.id === currentUser.id);
+    if (userIndex !== -1) {
+      delete users[userIndex].avatarUrl;
+      StorageService.saveUsers(users);
+      if (refreshUser) refreshUser();
+    }
+    
+    addToast({
+      type: 'info',
+      title: 'Profile Picture Removed',
+      description: 'Your profile picture has been removed.',
+    });
+  };
 
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,6 +232,72 @@ export const AdminSettings: React.FC = () => {
       </div>
 
       <div className="max-w-4xl space-y-6">
+        {/* Admin Profile Card */}
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
+          <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-800">
+            <ShieldCheck className="w-5 h-5 text-emerald-400" />
+            <h3 className="text-sm font-bold text-white uppercase tracking-wider">
+              Admin Profile
+            </h3>
+          </div>
+
+          <div className="flex items-center gap-6">
+            <div className="relative">
+              {avatarUrl ? (
+                <img 
+                  src={avatarUrl} 
+                  alt={currentUser.name} 
+                  className="w-20 h-20 rounded-full object-cover border-2 border-emerald-500 shadow-lg"
+                />
+              ) : (
+                <div
+                  className="w-20 h-20 rounded-full flex items-center justify-center font-bold text-2xl text-white shadow-lg"
+                  style={{ backgroundColor: currentUser.color || '#10b981' }}
+                >
+                  {currentUser.name.charAt(0).toUpperCase()}
+                </div>
+              )}
+              
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                className="absolute -bottom-1 -right-1 p-1.5 rounded-full bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg transition disabled:opacity-50"
+                title="Upload profile picture"
+              >
+                {isUploading ? (
+                  <Upload className="w-3.5 h-3.5 animate-pulse" />
+                ) : (
+                  <Camera className="w-3.5 h-3.5" />
+                )}
+              </button>
+              
+              {avatarUrl && (
+                <button
+                  onClick={handleRemoveAvatar}
+                  className="absolute -top-1 -right-1 p-1 rounded-full bg-rose-600 hover:bg-rose-500 text-white shadow-lg transition"
+                  title="Remove profile picture"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
+              
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleAvatarUpload}
+                className="hidden"
+              />
+            </div>
+
+            <div>
+              <div className="text-lg font-bold text-white">{currentUser.name}</div>
+              <div className="text-sm text-slate-400">@{currentUser.username}</div>
+              <div className="text-xs text-slate-500 mt-1">System Administrator</div>
+            </div>
+          </div>
+        </div>
+
         {/* Business & POS Configuration */}
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl">
           <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-800">
