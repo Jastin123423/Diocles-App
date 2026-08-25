@@ -1,4 +1,4 @@
-// src/services/syncService.ts (UPDATED WITH DEBTS SYNC)
+// src/services/syncService.ts (UPDATED WITH SALE ITEMS)
 import { db } from '../db/storage';
 import { SyncQueueItem, User } from '../types';
 import { CloudflareApi } from './cloudflareApi';
@@ -289,6 +289,24 @@ export class SyncService {
       
       cloudData.sales.forEach((cloudSale: any) => {
         const index = mergedSales.findIndex(s => s.id === cloudSale.id);
+        
+        // Find items for this sale
+        const saleItems = (cloudData.saleItems || [])
+          .filter((item: any) => item.sale_id === cloudSale.id)
+          .map((item: any) => ({
+            id: item.id,
+            saleId: item.sale_id,
+            shopId: item.shop_id,
+            productId: item.product_id,
+            productName: item.product_name,
+            sku: item.sku,
+            unitPrice: item.unit_price,
+            purchasePrice: item.purchase_price,
+            quantity: item.quantity,
+            discount: item.discount,
+            total: item.total,
+          }));
+        
         const saleData = {
           id: cloudSale.id,
           receiptNumber: cloudSale.receipt_number,
@@ -308,7 +326,7 @@ export class SyncService {
           status: cloudSale.status,
           notes: cloudSale.notes,
           createdAt: cloudSale.created_at,
-          items: [],
+          items: saleItems,
         };
         
         if (index === -1) {
