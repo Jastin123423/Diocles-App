@@ -15,7 +15,7 @@ export async function onRequestPost(context: any) {
   try {
     const formData = await request.formData();
     const file = formData.get('file') as File;
-    const type = formData.get('type') as string; // 'product' or 'seller'
+    const type = formData.get('type') as string;
     const entityId = formData.get('entityId') as string;
     const imageOrder = formData.get('imageOrder') as string;
 
@@ -26,7 +26,6 @@ export async function onRequestPost(context: any) {
       });
     }
 
-    // Create R2 key based on type
     const key = type === 'seller' 
       ? `sellers/${entityId}/profile_${Date.now()}_${file.name}`
       : `products/${entityId}/${Date.now()}_${file.name}`;
@@ -35,20 +34,20 @@ export async function onRequestPost(context: any) {
       httpMetadata: { contentType: file.type },
     });
 
-    // Update database with image URL
+    // Build full URL
+    const url = new URL(request.url);
+    const baseUrl = `${url.protocol}//${url.host}`;
+    const fullUrl = `${baseUrl}/api/r2/files/${key}`;
+
+    // Update database for seller avatars
     if (type === 'seller') {
       await env.DB.prepare(`
-        UPDATE users SET color = color, updated_at = ? WHERE id = ?
-      `).bind(new Date().toISOString(), entityId).run();
-      
-      // Store image key in a separate column or reuse existing
-      await env.DB.prepare(`
         ALTER TABLE users ADD COLUMN avatar_url TEXT
-      `).run().catch(() => {}); // Ignore if column already exists
+      `).run().catch(() => {});
       
       await env.DB.prepare(`
         UPDATE users SET avatar_url = ?, updated_at = ? WHERE id = ?
-      `).bind(key, new Date().toISOString(), entityId).run();
+      `).bind(fullUrl, new Date().toISOString(), entityId).run();
     }
 
     return new Response(JSON.stringify({
@@ -56,7 +55,7 @@ export async function onRequestPost(context: any) {
       key,
       size: file.size,
       mimeType: file.type,
-      url: `/api/r2/files/${key}`,
+      url: fullUrl,
     }), {
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     });
