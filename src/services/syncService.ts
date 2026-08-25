@@ -1,4 +1,4 @@
-// src/services/syncService.ts (UPDATED WITH applyCloudData)
+// src/services/syncService.ts (UPDATED WITH PURCHASES)
 import { db } from '../db/storage';
 import { SyncQueueItem, User } from '../types';
 import { CloudflareApi } from './cloudflareApi';
@@ -319,6 +319,40 @@ export class SyncService {
       });
       
       db.saveSales(mergedSales);
+    }
+
+    // Apply purchases
+    if (cloudData.purchases && cloudData.purchases.length > 0) {
+      const localPurchases = db.getPurchases();
+      const mergedPurchases = [...localPurchases];
+      
+      cloudData.purchases.forEach((cloudPurchase: any) => {
+        const index = mergedPurchases.findIndex(p => p.id === cloudPurchase.id);
+        const purchaseData = {
+          id: cloudPurchase.id,
+          purchaseNumber: cloudPurchase.purchase_number,
+          shopId: cloudPurchase.shop_id,
+          shopName: cloudPurchase.shop_name,
+          supplierName: cloudPurchase.supplier_name,
+          date: cloudPurchase.date,
+          totalAmount: cloudPurchase.total_amount,
+          paymentStatus: cloudPurchase.payment_status,
+          notes: cloudPurchase.notes,
+          invoiceNumber: cloudPurchase.invoice_number,
+          createdByUserId: cloudPurchase.created_by_user_id,
+          createdByName: cloudPurchase.created_by_name,
+          createdAt: cloudPurchase.created_at,
+          items: [],
+        };
+        
+        if (index === -1) {
+          mergedPurchases.push(purchaseData);
+        } else {
+          mergedPurchases[index] = { ...mergedPurchases[index], ...purchaseData };
+        }
+      });
+      
+      db.savePurchases(mergedPurchases);
     }
 
     // Apply expenses
