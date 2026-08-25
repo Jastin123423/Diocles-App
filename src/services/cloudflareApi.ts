@@ -400,19 +400,21 @@ private static config: CloudflareConfig = {
   // R2 FILE OPERATIONS
   // ==========================================
   
-  // Upload product image to R2
-  static async uploadFile(
+  // Upload product or seller image to R2
+  static async uploadImage(
     file: File | Blob,
-    productId: string,
-    imageOrder: number
-  ): Promise<{ success: boolean; key: string; size: number; mimeType: string }> {
+    type: 'product' | 'seller',
+    entityId: string,
+    imageOrder: number = 0
+  ): Promise<{ success: boolean; key: string; url: string; size: number }> {
     if (!this.isOnline()) {
       throw new Error('OFFLINE: Cannot upload file');
     }
 
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('productId', productId);
+    formData.append('type', type);
+    formData.append('entityId', entityId);
     formData.append('imageOrder', imageOrder.toString());
 
     const response = await fetch(`${this.config.baseUrl}/api/r2/upload`, {
@@ -429,6 +431,15 @@ private static config: CloudflareConfig = {
     }
 
     return await response.json();
+  }
+
+  // Upload product image to R2 (legacy method - kept for backward compatibility)
+  static async uploadFile(
+    file: File | Blob,
+    productId: string,
+    imageOrder: number
+  ): Promise<{ success: boolean; key: string; size: number; mimeType: string }> {
+    return this.uploadImage(file, 'product', productId, imageOrder) as Promise<{ success: boolean; key: string; size: number; mimeType: string }>;
   }
 
   // Upload backup to R2
