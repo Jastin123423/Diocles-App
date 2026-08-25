@@ -3,7 +3,13 @@ export async function onRequestGet(context: any) {
   const key = context.params.key;
   
   try {
-    const object = await env.MEDIA_BUCKET.get(key);
+    // Try to get the file - try both paths
+    let object = await env.MEDIA_BUCKET.get(key);
+    
+    // If not found, try with 'files/' prefix
+    if (!object) {
+      object = await env.MEDIA_BUCKET.get(`files/${key}`);
+    }
     
     if (!object) {
       return new Response(JSON.stringify({ error: 'File not found' }), { 
