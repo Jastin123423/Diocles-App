@@ -17,7 +17,7 @@ export async function onRequestGet(context: any) {
     headers.set('etag', object.httpEtag);
     headers.set('Access-Control-Allow-Origin', '*');
     headers.set('Cache-Control', 'public, max-age=31536000, immutable');
-    headers.set('Content-Disposition', 'inline'); // Display inline, not download
+    headers.set('Content-Disposition', 'inline');
 
     return new Response(object.body, { headers });
   } catch (error: any) {
