@@ -1,12 +1,15 @@
 export async function onRequestGet(context: any) {
-  const { request, env } = context;
+  const { env } = context;
   const key = context.params.key;
   
   try {
     const object = await env.MEDIA_BUCKET.get(key);
     
     if (!object) {
-      return new Response('File not found', { status: 404 });
+      return new Response(JSON.stringify({ error: 'File not found' }), { 
+        status: 404,
+        headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      });
     }
 
     const headers = new Headers();
@@ -14,6 +17,7 @@ export async function onRequestGet(context: any) {
     headers.set('etag', object.httpEtag);
     headers.set('Access-Control-Allow-Origin', '*');
     headers.set('Cache-Control', 'public, max-age=31536000, immutable');
+    headers.set('Content-Disposition', 'inline'); // Display inline, not download
 
     return new Response(object.body, { headers });
   } catch (error: any) {
