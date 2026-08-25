@@ -282,16 +282,25 @@ async function upsertUser(db: any, user: any) {
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
+      username = excluded.username,
       name = excluded.name,
+      role = excluded.role,
+      password_hash = excluded.password_hash,
       color = excluded.color,
       status = excluded.status,
       assigned_shop_ids = excluded.assigned_shop_ids,
       updated_at = excluded.updated_at
   `).bind(
-    user.id, user.username || user.id, user.name, user.role || 'SELLER',
-    user.passwordHash || '', user.color || 'blue', user.status || 'ACTIVE',
+    user.id, 
+    user.username || user.id, 
+    user.name, 
+    user.role || 'SELLER',
+    user.passwordHash || user.password_hash || '',
+    user.color || 'blue', 
+    user.status || 'ACTIVE',
     JSON.stringify(user.assignedShopIds || []),
-    user.createdAt || new Date().toISOString(), user.updatedAt || new Date().toISOString()
+    user.createdAt || new Date().toISOString(), 
+    user.updatedAt || new Date().toISOString()
   ).run();
 }
 
