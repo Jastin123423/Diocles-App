@@ -400,6 +400,11 @@ private static config: CloudflareConfig = {
   // R2 FILE OPERATIONS
   // ==========================================
   
+  // Get custom R2 domain for serving files
+  static getR2BaseUrl(): string {
+    return 'https://m.diocres.jobsreport.online';
+  }
+
   // Upload product or seller image to R2
   static async uploadImage(
     file: File | Blob,
@@ -430,7 +435,14 @@ private static config: CloudflareConfig = {
       throw new Error(`Upload failed: ${response.status}`);
     }
 
-    return await response.json();
+    const result = await response.json();
+    
+    // Ensure URL uses custom R2 domain
+    if (result.url && !result.url.includes('m.diocres.jobsreport.online')) {
+      result.url = `${this.getR2BaseUrl()}/${result.key}`;
+    }
+    
+    return result;
   }
 
   // Upload product image to R2 (legacy method - kept for backward compatibility)
@@ -467,9 +479,9 @@ private static config: CloudflareConfig = {
     return await response.json();
   }
 
-  // Get R2 file URL
+  // Get R2 file URL with custom domain
   static getFileUrl(key: string): string {
-    return `${this.config.baseUrl}/api/r2/files/${key}`;
+    return `${this.getR2BaseUrl()}/${key}`;
   }
 
   // Delete R2 file
@@ -482,4 +494,3 @@ private static config: CloudflareConfig = {
     const result = await this.request('/r2/backups');
     return result.backups || [];
   }
-}
