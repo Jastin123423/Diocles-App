@@ -106,6 +106,10 @@ async function processOperation(db: any, op: any) {
       await recordStockAdjustment(db, payload);
       break;
     
+    case 'UPDATE_SETTINGS':
+      await updateSettings(db, payload);
+      break;
+    
     default:
       throw new Error(`Unknown operation: ${operation}`);
   }
@@ -324,4 +328,41 @@ async function recordStockAdjustment(db: any, movement: any) {
   await db.prepare(`
     UPDATE products SET current_stock = ?, updated_at = ? WHERE id = ?
   `).bind(movement.newQty, new Date().toISOString(), movement.productId).run();
+}
+
+// NEW: Update settings function
+async function updateSettings(db: any, settings: any) {
+  await db.prepare(`
+    UPDATE settings SET
+      business_name = ?,
+      tagline = ?,
+      address = ?,
+      phone = ?,
+      email = ?,
+      currency_symbol = ?,
+      currency_code = ?,
+      tax_rate_percent = ?,
+      enable_tax = ?,
+      receipt_header_note = ?,
+      receipt_footer_note = ?,
+      receipt_paper_width = ?,
+      low_stock_threshold_default = ?,
+      updated_at = ?
+    WHERE id = 'global'
+  `).bind(
+    settings.businessName || 'Diocres Hardware&Retail Solutions',
+    settings.tagline || null,
+    settings.address || null,
+    settings.phone || null,
+    settings.email || null,
+    settings.currencySymbol || 'TSh',
+    settings.currencyCode || 'TZS',
+    settings.taxRatePercent || 0,
+    settings.enableTax ? 1 : 0,
+    settings.receiptHeaderNote || null,
+    settings.receiptFooterNote || null,
+    settings.receiptPaperWidth || '80mm',
+    settings.lowStockThresholdDefault || 5,
+    new Date().toISOString()
+  ).run();
 }
