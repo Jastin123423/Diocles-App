@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState } from 'react';
 import {
   Search,
   Receipt,
@@ -57,7 +57,6 @@ export const AdminSales: React.FC = () => {
   const totalVolume = sales.reduce((sum, s) => (s.status === 'COMPLETED' ? sum + s.total : sum), 0);
   const totalProfit = sales.reduce((sum, s) => (s.status === 'COMPLETED' ? sum + s.grossProfit : sum), 0);
 
-  // Get current shop name for filter display
   const selectedShopName = shopFilter === 'ALL' ? 'All Shops' : (shops.find(s => s.id === shopFilter)?.name || 'Unknown Shop');
 
   const handleExecuteVoid = () => {
@@ -138,10 +137,6 @@ export const AdminSales: React.FC = () => {
           .item-tag { display: inline-block; background: #e0e7ff; color: #4338ca; padding: 2px 6px; border-radius: 4px; margin: 2px; font-size: 11px; }
           .footer { text-align: center; margin-top: 20px; font-size: 11px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 10px; }
           .shop-badge { display: inline-block; background: #dbeafe; color: #1e40af; padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; margin-bottom: 10px; }
-          @media print {
-            body { padding: 0; }
-            .no-print { display: none; }
-          }
         </style>
       </head>
       <body>
@@ -200,7 +195,7 @@ export const AdminSales: React.FC = () => {
                 <td>${sale.paymentMethod}</td>
                 <td class="${sale.status === 'COMPLETED' ? 'status-completed' : 'status-voided'}">${sale.status}</td>
                 <td class="amount">${settings.currencySymbol} ${sale.total.toLocaleString()}</td>
-                <td class="amount">${settings.currencySymbol} ${sale.grossProfit.toLocaleString()}</td>
+                <td class="amount">${sale.status === 'COMPLETED' ? `${settings.currencySymbol} ${sale.grossProfit.toLocaleString()}` : `${settings.currencySymbol} 0`}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -211,11 +206,7 @@ export const AdminSales: React.FC = () => {
           ${settings.receiptFooterNote || 'Thank you for your business!'}
         </div>
 
-        <script>
-          window.onload = function() {
-            window.print();
-          }
-        </script>
+        <script>window.onload = function() { window.print(); }</script>
       </body>
       </html>
     `;
@@ -223,9 +214,7 @@ export const AdminSales: React.FC = () => {
     printWindow.document.write(printContent);
     printWindow.document.close();
     
-    setTimeout(() => {
-      setIsPrinting(false);
-    }, 2000);
+    setTimeout(() => setIsPrinting(false), 2000);
   };
 
   // Export CSV
@@ -236,7 +225,7 @@ export const AdminSales: React.FC = () => {
     
     sales.forEach(sale => {
       const products = (sale.items || []).map(i => `${i.quantity}x ${i.productName}`).join('; ');
-      csv += `"${sale.receiptNumber}","${formatDateTime(sale.createdAt)}","${sale.shopName || ''}","${sale.sellerName}","${products}","${sale.paymentMethod}","${sale.status}",${sale.total},${sale.grossProfit}\n`;
+      csv += `"${sale.receiptNumber}","${formatDateTime(sale.createdAt)}","${sale.shopName || ''}","${sale.sellerName}","${products}","${sale.paymentMethod}","${sale.status}",${sale.total},${sale.status === 'COMPLETED' ? sale.grossProfit : 0}\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -278,7 +267,6 @@ export const AdminSales: React.FC = () => {
             </span>
           </div>
 
-          {/* Print & Export Buttons */}
           <div className="flex gap-2">
             <button
               onClick={handlePrint}
@@ -302,7 +290,6 @@ export const AdminSales: React.FC = () => {
       {/* Filter Toolbar */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 mb-5 space-y-3 text-xs">
         <div className="flex flex-wrap items-center gap-3">
-          {/* Search */}
           <div className="relative flex-1 min-w-[220px]">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
@@ -314,7 +301,6 @@ export const AdminSales: React.FC = () => {
             />
           </div>
 
-          {/* Shop Filter */}
           <select
             value={shopFilter}
             onChange={e => setShopFilter(e.target.value)}
@@ -326,7 +312,6 @@ export const AdminSales: React.FC = () => {
             ))}
           </select>
 
-          {/* Seller Filter */}
           <select
             value={sellerFilter}
             onChange={e => setSellerFilter(e.target.value)}
@@ -334,13 +319,10 @@ export const AdminSales: React.FC = () => {
           >
             <option value="ALL">All Sellers / Cashiers</option>
             {sellers.map(s => (
-              <option key={s.id} value={s.id}>
-                {s.name} (@{s.username})
-              </option>
+              <option key={s.id} value={s.id}>{s.name} (@{s.username})</option>
             ))}
           </select>
 
-          {/* Payment Method */}
           <select
             value={paymentFilter}
             onChange={e => setPaymentFilter(e.target.value)}
@@ -354,7 +336,6 @@ export const AdminSales: React.FC = () => {
             <option value="OTHER">Other</option>
           </select>
 
-          {/* Status Filter */}
           <select
             value={statusFilter}
             onChange={e => setStatusFilter(e.target.value)}
@@ -366,7 +347,6 @@ export const AdminSales: React.FC = () => {
           </select>
         </div>
 
-        {/* Date Range */}
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800/80">
           <div className="flex items-center gap-2">
             <Calendar className="w-3.5 h-3.5 text-slate-400" />
@@ -437,9 +417,7 @@ export const AdminSales: React.FC = () => {
 
                   return (
                     <tr key={sale.id} className={`hover:bg-slate-850/60 transition ${isVoided ? 'opacity-65' : ''}`}>
-                      <td className="py-3 px-4 font-mono font-bold text-white">
-                        {sale.receiptNumber}
-                      </td>
+                      <td className="py-3 px-4 font-mono font-bold text-white">{sale.receiptNumber}</td>
                       <td className="py-3 px-4 text-slate-400">{formatDateTime(sale.createdAt)}</td>
                       <td className="py-3 px-4">
                         <span className="px-2 py-0.5 rounded bg-blue-950/70 text-blue-300 border border-blue-800/50 text-[10px] font-semibold">
@@ -453,7 +431,6 @@ export const AdminSales: React.FC = () => {
                             <span
                               key={idx}
                               className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700/60 text-[11px] text-slate-200"
-                              title={`${item.quantity}x ${item.productName} @ ${formatCurrency(item.unitPrice, settings.currencySymbol)}`}
                             >
                               <span className="font-bold text-blue-400">{item.quantity}x</span>
                               <span className="truncate max-w-[120px]">{item.productName}</span>
@@ -470,7 +447,7 @@ export const AdminSales: React.FC = () => {
                         {formatCurrency(sale.total, settings.currencySymbol)}
                       </td>
                       <td className="py-3 px-4 text-right font-mono font-bold text-emerald-400">
-                        {isVoided ? '$0.00' : `+${formatCurrency(sale.grossProfit, settings.currencySymbol)}`}
+                        {isVoided ? formatCurrency(0, settings.currencySymbol) : `+${formatCurrency(sale.grossProfit, settings.currencySymbol)}`}
                       </td>
                       <td className="py-3 px-4 text-center">
                         <span
@@ -511,7 +488,7 @@ export const AdminSales: React.FC = () => {
         </div>
       </div>
 
-      {/* Modal: Void / Cancel Transaction with Inventory Restoration */}
+      {/* Void Modal */}
       {voidingSale && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-in fade-in zoom-in-95">
@@ -520,10 +497,7 @@ export const AdminSales: React.FC = () => {
                 <Ban className="w-5 h-5" />
                 <h3 className="text-base font-bold text-white">Void Sale {voidingSale.receiptNumber}</h3>
               </div>
-              <button
-                onClick={() => setVoidingSale(null)}
-                className="text-slate-400 hover:text-white p-1"
-              >
+              <button onClick={() => setVoidingSale(null)} className="text-slate-400 hover:text-white p-1">
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -531,42 +505,27 @@ export const AdminSales: React.FC = () => {
             <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-200 text-xs mb-4 flex items-start gap-2">
               <RotateCcw className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <div>
-                <strong>Automatic Stock Restoration:</strong> Voiding this transaction will preserve the historical record (marked as VOIDED) and automatically restock all{' '}
-                <strong>{voidingSale.items.reduce((s, i) => s + i.quantity, 0)} units</strong> back into local inventory.
+                <strong>Automatic Stock Restoration:</strong> Voiding this transaction will preserve the historical record and automatically restock all{' '}
+                <strong>{voidingSale.items.reduce((s, i) => s + i.quantity, 0)} units</strong> back into inventory.
               </div>
             </div>
 
             <div className="space-y-3 text-xs mb-5">
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">
-                  Cancellation Reason *
-                </label>
-                <textarea
-                  required
-                  rows={3}
-                  value={voidReason}
-                  onChange={e => setVoidReason(e.target.value)}
-                  placeholder="e.g. Customer returned items / Incorrect payment method selected / Order entered by mistake"
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-rose-500"
-                />
-              </div>
+              <label className="block text-slate-300 font-semibold mb-1">Cancellation Reason *</label>
+              <textarea
+                required
+                rows={3}
+                value={voidReason}
+                onChange={e => setVoidReason(e.target.value)}
+                placeholder="e.g. Customer returned items..."
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
+              />
             </div>
 
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={() => setVoidingSale(null)}
-                className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition text-xs"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleExecuteVoid}
-                disabled={isVoiding}
-                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold shadow transition text-xs disabled:opacity-50"
-              >
-                {isVoiding ? 'Processing...' : 'Confirm Void & Restock Items'}
+              <button onClick={() => setVoidingSale(null)} className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs">Cancel</button>
+              <button onClick={handleExecuteVoid} disabled={isVoiding} className="px-4 py-2 rounded-lg bg-rose-600 text-white text-xs font-bold">
+                {isVoiding ? 'Processing...' : 'Confirm Void & Restock'}
               </button>
             </div>
           </div>
