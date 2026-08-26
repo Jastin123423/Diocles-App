@@ -23,7 +23,7 @@ import { StorageService } from '../../db/storage';
 import { CloudflareApi } from '../../services/cloudflareApi';
 import { User } from '../../types';
 import { SELLER_COLORS, getSellerColorById } from '../../utils/colors';
-import { formatDateTime } from '../../utils/formatters';
+import { formatCurrency, formatDateTime } from '../../utils/formatters';
 
 export const AdminSellers: React.FC = () => {
   const { currentUser, dbState, addToast, refreshUser } = useApp();
@@ -450,7 +450,7 @@ export const AdminSellers: React.FC = () => {
                   <div className="flex justify-between text-slate-400">
                     <span>Lifetime Sales</span>
                     <span className="font-mono text-emerald-400 font-semibold">
-                      ${totalSalesVolume.toFixed(2)} ({sellerSales.length})
+                      {formatCurrency(totalSalesVolume, dbState.settings?.currencySymbol || 'TSh')} ({sellerSales.length})
                     </span>
                   </div>
                   <div className="flex justify-between text-slate-400">
