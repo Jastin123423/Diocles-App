@@ -12,6 +12,7 @@ import {
 import { useApp } from '../../context/AppContext';
 import { ProductService } from '../../services/productService';
 import { formatCurrency } from '../../utils/formatters';
+import { formatPriceInput, parsePriceInput } from '../../utils/priceInput';
 import { Product, ProductImage } from '../../types';
 import { ProductThumbnail } from '../common/ProductThumbnail';
 import { ProductImageViewerModal } from '../common/ProductImageViewerModal';
@@ -68,14 +69,15 @@ export const SellerProducts: React.FC = () => {
       return;
     }
 
-    const price = parseFloat(sellingPrice);
+    // Parse formatted price strings back to numbers
+    const price = parsePriceInput(sellingPrice);
     if (isNaN(price) || price < 0) {
       setFormError('Please enter a valid selling price.');
       setIsSaving(false);
       return;
     }
 
-    const costPrice = parseFloat(purchasePrice) || 0;
+    const costPrice = parsePriceInput(purchasePrice) || 0;
 
     if (!currentUser) {
       setIsSaving(false);
@@ -379,39 +381,25 @@ export const SellerProducts: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Purchase Price</label>
-                  <div className="relative">
-                    <span className="absolute left-2.5 top-2 text-slate-500 font-mono">
-                      {settings.currencySymbol}
-                    </span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={purchasePrice}
-                      onChange={e => setPurchasePrice(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-6 pr-3 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    value={purchasePrice}
+                    onChange={e => setPurchasePrice(formatPriceInput(e.target.value))}
+                    placeholder="0"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
                 </div>
 
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Proposed Selling Price *</label>
-                  <div className="relative">
-                    <span className="absolute left-2.5 top-2 text-slate-500 font-mono">
-                      {settings.currencySymbol}
-                    </span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      required
-                      value={sellingPrice}
-                      onChange={e => setSellingPrice(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-6 pr-3 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    required
+                    value={sellingPrice}
+                    onChange={e => setSellingPrice(formatPriceInput(e.target.value))}
+                    placeholder="0"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
                 </div>
               </div>
 
