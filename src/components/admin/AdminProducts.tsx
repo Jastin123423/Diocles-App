@@ -22,6 +22,7 @@ import { CategoryService } from '../../services/categoryService';
 import { db } from '../../db/storage';
 import { Product, Category, ProductImage } from '../../types';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
+import { formatPriceInput, parsePriceInput, formatNumberWithCommas } from '../../utils/priceInput';
 import { ProductThumbnail } from '../common/ProductThumbnail';
 import { ProductImageViewerModal } from '../common/ProductImageViewerModal';
 import { ProductImageUpload } from '../common/ProductImageUpload';
@@ -119,8 +120,8 @@ export const AdminProducts: React.FC = () => {
     setSku(p.sku);
     setBarcode(p.barcode);
     setCategoryId(p.categoryId);
-    setPurchasePrice(p.purchasePrice.toString());
-    setSellingPrice(p.sellingPrice.toString());
+    setPurchasePrice(formatNumberWithCommas(p.purchasePrice)); // Format for display
+    setSellingPrice(formatNumberWithCommas(p.sellingPrice));
     setCurrentStock(p.currentStock.toString());
     setMinStock(p.minStock.toString());
     setUnit(p.unit);
@@ -154,8 +155,9 @@ export const AdminProducts: React.FC = () => {
       return;
     }
 
-    const sPrice = parseFloat(sellingPrice);
-    const pPrice = parseFloat(purchasePrice) || 0;
+    // Parse formatted price strings back to numbers
+    const sPrice = parsePriceInput(sellingPrice);
+    const pPrice = parsePriceInput(purchasePrice) || 0;
 
     if (isNaN(sPrice) || sPrice < 0) {
       setFormError('Please enter a valid selling price.');
@@ -759,25 +761,21 @@ export const AdminProducts: React.FC = () => {
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Purchase Price</label>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0"
+                    type="text"
                     value={purchasePrice}
-                    onChange={e => setPurchasePrice(e.target.value)}
-                    placeholder="0.00"
+                    onChange={e => setPurchasePrice(formatPriceInput(e.target.value))}
+                    placeholder="0"
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono"
                   />
                 </div>
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Selling Price *</label>
                   <input
-                    type="number"
-                    step="0.01"
-                    min="0"
+                    type="text"
                     required
                     value={sellingPrice}
-                    onChange={e => setSellingPrice(e.target.value)}
-                    placeholder="0.00"
+                    onChange={e => setSellingPrice(formatPriceInput(e.target.value))}
+                    placeholder="0"
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono"
                   />
                 </div>
