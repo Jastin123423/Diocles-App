@@ -14,6 +14,7 @@ import { useApp } from '../../context/AppContext';
 import { ExpenseService } from '../../services/expenseService';
 import { ExpenseCategory, PaymentMethod } from '../../types';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
+import { formatPriceInput, parsePriceInput } from '../../utils/priceInput';
 
 const EXPENSE_CATEGORIES: { id: ExpenseCategory; label: string }[] = [
   { id: 'RENT', label: 'Store Rent & Lease' },
@@ -75,7 +76,8 @@ export const AdminExpenses: React.FC = () => {
       return;
     }
 
-    const amt = parseFloat(amount);
+    // Parse formatted amount string back to number
+    const amt = parsePriceInput(amount);
     if (isNaN(amt) || amt <= 0) {
       setFormError('Please enter a valid expense amount.');
       return;
@@ -298,21 +300,14 @@ export const AdminExpenses: React.FC = () => {
 
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Amount Spent *</label>
-                  <div className="relative">
-                    <span className="absolute left-2.5 top-2 text-slate-500 font-mono">
-                      {settings.currencySymbol}
-                    </span>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0.01"
-                      required
-                      value={amount}
-                      onChange={e => setAmount(e.target.value)}
-                      placeholder="0.00"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-6 pr-3 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    required
+                    value={amount}
+                    onChange={e => setAmount(formatPriceInput(e.target.value))}
+                    placeholder="0"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
                 </div>
               </div>
 
