@@ -1,5 +1,3 @@
-// src/utils/priceInput.ts
-
 /**
  * Format a number with thousands separators as user types
  * e.g., "10000" becomes "10,000"
@@ -8,14 +6,21 @@ export function formatPriceInput(value: string): string {
   // Remove any non-digit characters except decimal point
   const clean = value.replace(/[^\d.]/g, '');
   
-  // Split into whole and decimal parts
+  // Prevent multiple decimal points
   const parts = clean.split('.');
+  if (parts.length > 2) {
+    return parts[0] + '.' + parts.slice(1).join('');
+  }
+  
+  // Split into whole and decimal parts
+  const whole = parts[0];
+  const decimal = parts[1];
   
   // Format whole number part with commas
-  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const formattedWhole = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   
   // Rejoin with decimal if present
-  return parts.join('.');
+  return decimal !== undefined ? `${formattedWhole}.${decimal}` : formattedWhole;
 }
 
 /**
