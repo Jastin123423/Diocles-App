@@ -3,6 +3,7 @@ import { useApp } from '../../context/AppContext';
 import { DebtService } from '../../services/debtService';
 import { DebtRecord, DebtType, DebtStatus, DebtPayment } from '../../types';
 import { formatCurrency, formatDate, formatDateTime } from '../../utils/formatters';
+import { formatPriceInput, parsePriceInput } from '../../utils/priceInput';
 import {
   DollarSign,
   Plus,
@@ -61,15 +62,15 @@ export const DebtManagement: React.FC = () => {
   const [paymentNote, setPaymentNote] = useState('');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
 
-  // Compute live debts with statuses
+  // Compute live debts with statuses (FILTERED BY USER)
   const debts = useMemo(() => {
-    return DebtService.getAllDebts();
-  }, [dbState.debts]);
+    return DebtService.getAllDebts(currentUser);
+  }, [dbState.debts, currentUser]);
 
-  // Compute summary metrics
+  // Compute summary metrics (FILTERED BY USER)
   const summary = useMemo(() => {
-    return DebtService.getSummary();
-  }, [dbState.debts]);
+    return DebtService.getSummary(currentUser);
+  }, [dbState.debts, currentUser]);
 
   // Filtered debts
   const filteredDebts = useMemo(() => {
@@ -123,7 +124,7 @@ export const DebtManagement: React.FC = () => {
     setFormType(debt.type);
     setFormName(debt.debtorName);
     setFormProduct(debt.productDescription || '');
-    setFormAmount(debt.amount.toString());
+    setFormAmount(formatPriceInput(debt.amount.toString()));
     setFormDueDate(debt.dueDate ? debt.dueDate.slice(0, 10) : '');
     setFormContact(debt.contact || '');
     setFormNotes(debt.notes || '');
@@ -150,7 +151,7 @@ export const DebtManagement: React.FC = () => {
       return;
     }
 
-    const amt = parseFloat(formAmount);
+    const amt = parsePriceInput(formAmount);
     if (isNaN(amt) || amt <= 0) {
       addToast({ type: 'error', title: 'Weka kiasi sahihi / Enter a valid amount' });
       return;
@@ -177,7 +178,7 @@ export const DebtManagement: React.FC = () => {
           remainingAmount: newRemaining,
           dueDate: formDueDate,
         })),
-      });
+      }, currentUser);
 
       addToast({
         type: 'success',
@@ -215,7 +216,7 @@ export const DebtManagement: React.FC = () => {
     e.preventDefault();
     if (!payingDebt || !currentUser) return;
 
-    const paymentAmt = parseFloat(paymentAmountInput);
+    const paymentAmt = parsePriceInput(paymentAmountInput);
     if (isNaN(paymentAmt) || paymentAmt <= 0) {
       addToast({
         type: 'error',
@@ -268,9 +269,9 @@ export const DebtManagement: React.FC = () => {
 
   // Handle Delete
   const handleConfirmDelete = () => {
-    if (!deletingDebt) return;
+    if (!deletingDebt || !currentUser) return;
 
-    DebtService.deleteDebt(deletingDebt.id);
+    DebtService.deleteDebt(deletingDebt.id, currentUser);
 
     addToast({
       type: 'info',
@@ -862,13 +863,11 @@ export const DebtManagement: React.FC = () => {
                     Jumla ya Deni / Total Amount (TSh) <span className="text-rose-400">*</span>
                   </label>
                   <input
-                    type="number"
+                    type="text"
                     required
-                    min="1"
-                    step="any"
-                    placeholder="10000"
+                    placeholder="10,000"
                     value={formAmount}
-                    onChange={e => setFormAmount(e.target.value)}
+                    onChange={e => setFormAmount(formatPriceInput(e.target.value))}
                     className="w-full bg-slate-950 text-xs font-mono font-bold text-emerald-400 px-3 py-2 rounded-lg border border-slate-800 focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -944,7 +943,7 @@ export const DebtManagement: React.FC = () => {
         const totalDebt = payingDebt.amount;
         const currentPaid = payingDebt.paidAmount || (payingDebt.status === 'PAID' ? totalDebt : 0);
         const currentRemaining = payingDebt.remainingAmount !== undefined ? payingDebt.remainingAmount : Math.max(0, totalDebt - currentPaid);
-        const typedPayAmt = parseFloat(paymentAmountInput) || 0;
+        const typedPayAmt = parsePriceInput(paymentAmountInput) || 0;
         const calculatedRemainder = Math.max(0, currentRemaining - typedPayAmt);
         const isPayingFull = calculatedRemainder <= 0 && typedPayAmt >= currentRemaining;
 
@@ -1043,22 +1042,14 @@ export const DebtManagement: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="relative">
-                    <span className="absolute left-3.5 top-2.5 font-mono font-bold text-emerald-400 text-sm">
-                      {settings.currencySymbol}
-                    </span>
-                    <input
-                      type="number"
-                      required
-                      min="1"
-                      max={currentRemaining}
-                      step="any"
-                      placeholder="Weka kiasi..."
-                      value={paymentAmountInput}
-                      onChange={e => setPaymentAmountInput(e.target.value)}
-                      className="w-full bg-slate-950 text-base font-mono font-extrabold text-white pl-10 pr-3 py-2 rounded-xl border-2 border-emerald-500/50 focus:outline-none focus:border-emerald-400 shadow-inner"
-                    />
-                  </div>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Weka kiasi..."
+                    value={paymentAmountInput}
+                    onChange={e => setPaymentAmountInput(formatPriceInput(e.target.value))}
+                    className="w-full bg-slate-950 text-base font-mono font-extrabold text-white px-3 py-2 rounded-xl border-2 border-emerald-500/50 focus:outline-none focus:border-emerald-400 shadow-inner"
+                  />
                 </div>
 
                 {/* Live Remainder Calculation Preview */}
