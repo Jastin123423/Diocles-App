@@ -203,13 +203,6 @@ export const LoginView: React.FC = () => {
                 )}
               </button>
             </form>
-
-            {/* Help Text */}
-            <div className="mt-4 text-center">
-              <p className="text-[11px] text-slate-500">
-                Default Admin: <span className="text-slate-400 font-mono">Admin</span> / <span className="text-slate-400 font-mono">52775277</span>
-              </p>
-            </div>
           </div>
         </div>
       </div>
