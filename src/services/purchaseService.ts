@@ -12,7 +12,7 @@ export interface PurchaseItemInput {
 export class PurchaseService {
   /**
    * Record a new purchase order / stock-in for a specific shop.
-   * Automatically increments product stock in that shop's inventory.
+   * Uses Moving Average Cost for inventory valuation.
    */
   public static recordPurchase(
     params: {
@@ -44,23 +44,20 @@ export class PurchaseService {
       return { success: false, error: 'Please add at least one product item.' };
     }
 
-    // GET PRODUCTS - Use a fresh copy
-    const products = db.getProducts();
+    const products = [...db.getProducts()];
     const purchaseId = generateUUID();
     const purchaseNumber = generatePurchaseNumber();
     const purchaseItems: PurchaseItem[] = [];
     let totalAmount = 0;
 
-    // FIX: Track which products need updating
-    const productsToUpdate: { id: string; newStock: number; newPurchasePrice: number }[] = [];
-
     for (const itemInput of params.items) {
-      // FIX: Find product by ID only (more reliable)
-      const prod = products.find(p => p.id === itemInput.productId);
+      const prodIndex = products.findIndex(p => p.id === itemInput.productId);
       
-      if (!prod) {
+      if (prodIndex === -1) {
         return { success: false, error: `Product not found (ID: ${itemInput.productId})` };
       }
+
+      const prod = products[prodIndex];
 
       if (itemInput.quantity <= 0) {
         return { success: false, error: `Invalid quantity for ${prod.name}. Must be greater than 0.` };
@@ -82,17 +79,30 @@ export class PurchaseService {
         total: itemTotal,
       });
 
-      // FIX: Calculate new stock
-      const prevStock = prod.currentStock;
-      const newStock = prevStock + itemInput.quantity;
+      // MOVING AVERAGE COST CALCULATION
+      const currentStock = prod.currentStock || 0;
+      const currentPrice = prod.purchasePrice || 0;
+      const currentTotalCost = currentStock * currentPrice;
+      const newTotalCost = itemInput.quantity * itemInput.unitCost;
+      const newTotalStock = currentStock + itemInput.quantity;
       
-      productsToUpdate.push({
-        id: prod.id,
-        newStock,
-        newPurchasePrice: itemInput.unitCost,
-      });
+      // Calculate weighted average cost
+      const newAveragePrice = newTotalStock > 0 
+        ? (currentTotalCost + newTotalCost) / newTotalStock 
+        : itemInput.unitCost;
 
-      // Record inventory movement
+      const prevStock = currentStock;
+      const newStock = newTotalStock;
+
+      // Update product with new stock and AVERAGE cost (not latest cost)
+      products[prodIndex] = {
+        ...prod,
+        currentStock: newStock,
+        purchasePrice: Number(newAveragePrice.toFixed(2)),
+        updatedAt: new Date().toISOString(),
+      };
+
+      // Record inventory movement with ACTUAL purchase price
       const movement = {
         id: generateUUID(),
         shopId: targetShopId,
@@ -103,7 +113,8 @@ export class PurchaseService {
         changeQty: itemInput.quantity,
         newQty: newStock,
         type: 'PURCHASE' as const,
-        reason: `PO ${purchaseNumber} from ${params.supplierName.trim() || 'Walk-in Supplier'} [${shop.name}]`,
+        reason: `PO ${purchaseNumber} from ${params.supplierName?.trim() || 'Walk-in Supplier'} [${shop.name}] @ ${itemInput.unitCost}/unit (Avg: ${newAveragePrice.toFixed(2)})`,
+        costValue: itemTotal,
         userId: currentUser.id,
         userName: currentUser.name,
         createdAt: new Date().toISOString(),
@@ -111,26 +122,8 @@ export class PurchaseService {
       db.saveMovements([movement, ...db.getMovements()]);
     }
 
-    // FIX: Update product stock after loop - get fresh products and update
-    const freshProducts = db.getProducts();
-    const updatedProducts = freshProducts.map(p => {
-      const update = productsToUpdate.find(u => u.id === p.id);
-      if (update) {
-        return {
-          ...p,
-          currentStock: update.newStock,
-          purchasePrice: update.newPurchasePrice,
-          updatedAt: new Date().toISOString(),
-        };
-      }
-      return p;
-    });
-
-    // FIX: Save the updated products
-    db.saveProducts(updatedProducts);
-
-    // FIX: Verify stock was updated
-    console.log('Stock updates:', productsToUpdate);
+    // Save updated products with new average costs
+    db.saveProducts(products);
 
     const finalSupplierName = params.supplierName?.trim() || 'Walk-in Supplier';
 
