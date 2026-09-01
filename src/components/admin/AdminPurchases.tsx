@@ -17,8 +17,8 @@ import { formatCurrency, formatDateTime } from '../../utils/formatters';
 
 interface PurchaseItemInput {
   productId: string;
-  quantity: number;
-  unitCost: number;
+  quantity: number | string; // Allow empty string
+  unitCost: number | string; // Allow empty string
 }
 
 export const AdminPurchases: React.FC = () => {
@@ -74,8 +74,8 @@ export const AdminPurchases: React.FC = () => {
     setItems([
       {
         productId: initialProd?.id || '',
-        quantity: 0, // Default 0 instead of 10
-        unitCost: initialProd?.purchasePrice || 0,
+        quantity: '', // Empty string instead of 0
+        unitCost: '', // Empty string instead of 0
       },
     ]);
     setFormError('');
@@ -89,8 +89,8 @@ export const AdminPurchases: React.FC = () => {
       ...prev,
       {
         productId: prod?.id || '',
-        quantity: 0, // Default 0 instead of 5
-        unitCost: prod?.purchasePrice || 0,
+        quantity: '', // Empty string
+        unitCost: '', // Empty string
       },
     ]);
   };
@@ -108,7 +108,7 @@ export const AdminPurchases: React.FC = () => {
           return {
             ...item,
             productId: value,
-            unitCost: matched?.purchasePrice || 0,
+            unitCost: matched?.purchasePrice || '',
           };
         }
         return { ...item, [field]: value };
@@ -116,7 +116,11 @@ export const AdminPurchases: React.FC = () => {
     );
   };
 
-  const calculatedTotal = items.reduce((sum, item) => sum + item.quantity * item.unitCost, 0);
+  const calculatedTotal = items.reduce((sum, item) => {
+    const qty = parseFloat(item.quantity as string) || 0;
+    const cost = parseFloat(item.unitCost as string) || 0;
+    return sum + qty * cost;
+  }, 0);
 
   const handleSavePurchase = (e: React.FormEvent) => {
     e.preventDefault();
@@ -130,14 +134,24 @@ export const AdminPurchases: React.FC = () => {
       return;
     }
 
-    // Validate quantities
-    for (const item of items) {
+    // Convert items and validate
+    const finalItems = items.map(item => ({
+      productId: item.productId,
+      quantity: parseFloat(item.quantity as string) || 0,
+      unitCost: parseFloat(item.unitCost as string) || 0,
+    }));
+
+    for (const item of finalItems) {
       if (item.quantity <= 0) {
         setFormError('Quantity must be greater than 0 for all items.');
         return;
       }
       if (item.unitCost <= 0) {
         setFormError('Unit cost must be greater than 0 for all items.');
+        return;
+      }
+      if (!item.productId) {
+        setFormError('Please select a product for all items.');
         return;
       }
     }
@@ -147,7 +161,7 @@ export const AdminPurchases: React.FC = () => {
         shopId: purchaseShopId || availableShops[0]?.id || '',
         supplierName: finalSupplierName,
         invoiceNumber: invoiceNumber.trim() || undefined,
-        items,
+        items: finalItems,
         paymentStatus,
         notes,
       },
@@ -371,11 +385,10 @@ export const AdminPurchases: React.FC = () => {
                           <input
                             type="number"
                             min="0"
-                            required
                             value={item.quantity}
-                            onChange={e =>
-                              updateItemRow(idx, 'quantity', parseInt(e.target.value, 10) || 0)
-                            }
+                            onChange={e => {
+                              updateItemRow(idx, 'quantity', e.target.value);
+                            }}
                             placeholder="Qty"
                             className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono text-center"
                           />
@@ -386,18 +399,20 @@ export const AdminPurchases: React.FC = () => {
                             type="number"
                             step="0.01"
                             min="0"
-                            required
                             value={item.unitCost}
-                            onChange={e =>
-                              updateItemRow(idx, 'unitCost', parseFloat(e.target.value) || 0)
-                            }
+                            onChange={e => {
+                              updateItemRow(idx, 'unitCost', e.target.value);
+                            }}
                             placeholder="Cost"
                             className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono"
                           />
                         </div>
 
                         <div className="w-24 text-right font-mono font-bold text-white text-xs">
-                          {formatCurrency(item.quantity * item.unitCost, settings.currencySymbol)}
+                          {formatCurrency(
+                            (parseFloat(item.quantity as string) || 0) * (parseFloat(item.unitCost as string) || 0),
+                            settings.currencySymbol
+                          )}
                         </div>
 
                         {items.length > 1 && (
