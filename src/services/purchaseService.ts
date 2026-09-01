@@ -13,7 +13,6 @@ export class PurchaseService {
   /**
    * Record a new purchase order / stock-in for a specific shop.
    * Automatically increments product stock in that shop's inventory.
-   * Admin only.
    */
   public static recordPurchase(
     params: {
@@ -41,25 +40,27 @@ export class PurchaseService {
       return { success: false, error: 'Selected shop does not exist.' };
     }
 
-    if (!params.supplierName?.trim()) {
-      return { success: false, error: 'Supplier name is required.' };
-    }
-
     if (!params.items || params.items.length === 0) {
       return { success: false, error: 'Please add at least one product item.' };
     }
 
-    const products = db.getProducts();
+    // FIX: Create a deep copy of products array
+    const products = db.getProducts().map(p => ({ ...p }));
     const purchaseId = generateUUID();
     const purchaseNumber = generatePurchaseNumber();
     const purchaseItems: PurchaseItem[] = [];
     let totalAmount = 0;
 
     for (const itemInput of params.items) {
-      const prod = products.find(p => p.id === itemInput.productId && (p.shopId === targetShopId || !p.shopId));
-      if (!prod) {
+      const prodIndex = products.findIndex(
+        p => p.id === itemInput.productId && (p.shopId === targetShopId || !p.shopId)
+      );
+      
+      if (prodIndex === -1) {
         return { success: false, error: `Product not found in ${shop.name} (ID: ${itemInput.productId})` };
       }
+
+      const prod = products[prodIndex];
 
       if (itemInput.quantity <= 0) {
         return { success: false, error: `Invalid quantity for ${prod.name}. Must be greater than 0.` };
@@ -81,12 +82,16 @@ export class PurchaseService {
         total: itemTotal,
       });
 
-      // Update product current stock and purchase price
+      // FIX: Update stock in the copied array
       const prevStock = prod.currentStock;
       const newStock = prevStock + itemInput.quantity;
-      prod.currentStock = newStock;
-      prod.purchasePrice = itemInput.unitCost;
-      prod.updatedAt = new Date().toISOString();
+      
+      products[prodIndex] = {
+        ...prod,
+        currentStock: newStock,
+        purchasePrice: itemInput.unitCost,
+        updatedAt: new Date().toISOString(),
+      };
 
       // Record inventory movement
       const movement = {
@@ -99,7 +104,7 @@ export class PurchaseService {
         changeQty: itemInput.quantity,
         newQty: newStock,
         type: 'PURCHASE' as const,
-        reason: `PO ${purchaseNumber} from ${params.supplierName.trim()} [${shop.name}]`,
+        reason: `PO ${purchaseNumber} from ${params.supplierName.trim() || 'Walk-in Supplier'} [${shop.name}]`,
         userId: currentUser.id,
         userName: currentUser.name,
         createdAt: new Date().toISOString(),
@@ -107,14 +112,17 @@ export class PurchaseService {
       db.saveMovements([movement, ...db.getMovements()]);
     }
 
-    db.saveProducts([...products]);
+    // FIX: Save the updated products array with new stock
+    db.saveProducts(products);
+
+    const finalSupplierName = params.supplierName?.trim() || 'Walk-in Supplier';
 
     const newPurchase: Purchase = {
       id: purchaseId,
       shopId: targetShopId,
       shopName: shop.name,
       purchaseNumber,
-      supplierName: params.supplierName.trim(),
+      supplierName: finalSupplierName,
       date: params.date || new Date().toISOString().slice(0, 10),
       items: purchaseItems,
       totalAmount,
@@ -143,7 +151,7 @@ export class PurchaseService {
       userId: currentUser.id,
       userName: currentUser.name,
       action: 'RECORD_PURCHASE',
-      details: `Recorded purchase ${purchaseNumber} from ${newPurchase.supplierName} for [${shop.name}] ($${newPurchase.totalAmount.toFixed(2)})`,
+      details: `Recorded purchase ${purchaseNumber} from ${finalSupplierName} for [${shop.name}]`,
       entityType: 'PURCHASE',
       entityId: purchaseId,
       timestamp: new Date().toISOString(),
