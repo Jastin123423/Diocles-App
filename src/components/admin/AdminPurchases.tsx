@@ -74,7 +74,7 @@ export const AdminPurchases: React.FC = () => {
     setItems([
       {
         productId: initialProd?.id || '',
-        quantity: 10,
+        quantity: 0, // Default 0 instead of 10
         unitCost: initialProd?.purchasePrice || 0,
       },
     ]);
@@ -89,7 +89,7 @@ export const AdminPurchases: React.FC = () => {
       ...prev,
       {
         productId: prod?.id || '',
-        quantity: 5,
+        quantity: 0, // Default 0 instead of 5
         unitCost: prod?.purchasePrice || 0,
       },
     ]);
@@ -108,7 +108,7 @@ export const AdminPurchases: React.FC = () => {
           return {
             ...item,
             productId: value,
-            unitCost: matched?.purchasePrice || item.unitCost,
+            unitCost: matched?.purchasePrice || 0,
           };
         }
         return { ...item, [field]: value };
@@ -122,20 +122,30 @@ export const AdminPurchases: React.FC = () => {
     e.preventDefault();
     setFormError('');
 
-    if (!supplierName.trim()) {
-      setFormError('Supplier name is required.');
-      return;
-    }
+    // Supplier name is now OPTIONAL - if empty, use "Walk-in Supplier" or "Unknown Supplier"
+    const finalSupplierName = supplierName.trim() || 'Walk-in Supplier';
 
     if (items.length === 0) {
       setFormError('Please add at least one line item.');
       return;
     }
 
+    // Validate quantities
+    for (const item of items) {
+      if (item.quantity <= 0) {
+        setFormError('Quantity must be greater than 0 for all items.');
+        return;
+      }
+      if (item.unitCost <= 0) {
+        setFormError('Unit cost must be greater than 0 for all items.');
+        return;
+      }
+    }
+
     const res = PurchaseService.createPurchase(
       {
         shopId: purchaseShopId || availableShops[0]?.id || '',
-        supplierName: supplierName.trim(),
+        supplierName: finalSupplierName,
         invoiceNumber: invoiceNumber.trim() || undefined,
         items,
         paymentStatus,
@@ -148,7 +158,7 @@ export const AdminPurchases: React.FC = () => {
       addToast({
         type: 'success',
         title: 'Purchase Recorded & Stock Ingested',
-        description: `Order from ${supplierName} recorded. Product inventories were automatically restocked.`,
+        description: `Order from ${finalSupplierName} recorded. Product inventories were automatically restocked.`,
       });
       setIsModalOpen(false);
     } else {
@@ -296,13 +306,12 @@ export const AdminPurchases: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Supplier / Vendor Name *</label>
+                  <label className="block text-slate-300 font-medium mb-1">Supplier / Vendor Name (Optional)</label>
                   <input
                     type="text"
-                    required
                     value={supplierName}
                     onChange={e => setSupplierName(e.target.value)}
-                    placeholder="e.g. Apex Hardware Distro"
+                    placeholder="e.g. Apex Hardware Distro (or leave blank)"
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
                 </div>
@@ -336,72 +345,73 @@ export const AdminPurchases: React.FC = () => {
                 </div>
 
                 <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                  {items.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-2"
-                    >
-                      <div className="flex-1">
-                        <select
-                          value={item.productId}
-                          onChange={e => updateItemRow(idx, 'productId', e.target.value)}
-                          className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white"
-                        >
-                          {(shopProducts.length > 0 ? shopProducts : dbState.products).map(p => (
-                            <option key={p.id} value={p.id}>
-                              {p.name} ({p.sku}) - Current Stock: {p.currentStock} {p.unit}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
+                  {items.map((item, idx) => {
+                    const selectedProduct = dbState.products.find(p => p.id === item.productId);
+                    
+                    return (
+                      <div
+                        key={idx}
+                        className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-2"
+                      >
+                        <div className="flex-1">
+                          <select
+                            value={item.productId}
+                            onChange={e => updateItemRow(idx, 'productId', e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white"
+                          >
+                            {(shopProducts.length > 0 ? shopProducts : dbState.products).map(p => (
+                              <option key={p.id} value={p.id}>
+                                {p.name} ({p.sku}) - Stock: {p.currentStock} {p.unit}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
 
-                      <div className="w-20">
-                        <input
-                          type="number"
-                          min="1"
-                          required
-                          value={item.quantity}
-                          onChange={e =>
-                            updateItemRow(idx, 'quantity', parseInt(e.target.value, 10) || 1)
-                          }
-                          placeholder="Qty"
-                          className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono text-center"
-                        />
-                      </div>
+                        <div className="w-20">
+                          <input
+                            type="number"
+                            min="0"
+                            required
+                            value={item.quantity}
+                            onChange={e =>
+                              updateItemRow(idx, 'quantity', parseInt(e.target.value, 10) || 0)
+                            }
+                            placeholder="Qty"
+                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono text-center"
+                          />
+                        </div>
 
-                      <div className="w-28 relative">
-                        <span className="absolute left-2 top-1.5 text-slate-500 font-mono">
-                          {settings.currencySymbol}
-                        </span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          required
-                          value={item.unitCost}
-                          onChange={e =>
-                            updateItemRow(idx, 'unitCost', parseFloat(e.target.value) || 0)
-                          }
-                          placeholder="Cost"
-                          className="w-full bg-slate-900 border border-slate-800 rounded pl-5 pr-2 py-1.5 text-white font-mono"
-                        />
-                      </div>
+                        <div className="w-28">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            required
+                            value={item.unitCost}
+                            onChange={e =>
+                              updateItemRow(idx, 'unitCost', parseFloat(e.target.value) || 0)
+                            }
+                            placeholder="Cost"
+                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono"
+                          />
+                        </div>
 
-                      <div className="w-24 text-right font-mono font-bold text-white text-xs">
-                        {formatCurrency(item.quantity * item.unitCost, settings.currencySymbol)}
-                      </div>
+                        <div className="w-24 text-right font-mono font-bold text-white text-xs">
+                          {formatCurrency(item.quantity * item.unitCost, settings.currencySymbol)}
+                        </div>
 
-                      {items.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeItemRow(idx)}
-                          className="text-slate-500 hover:text-rose-400 p-1"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                        {items.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeItemRow(idx)}
+                            className="text-slate-500 hover:text-rose-400 p-1"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
