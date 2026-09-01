@@ -96,6 +96,16 @@ export const AdminPurchases: React.FC = () => {
     setInvoiceNumber(purchase.invoiceNumber || '');
     setPaymentStatus(purchase.paymentStatus);
     setNotes(purchase.notes || '');
+    
+    // Load existing items into editable form
+    setItems(
+      (purchase.items || []).map(item => ({
+        productId: item.productId,
+        quantity: item.quantity.toString(),
+        unitCost: item.unitCost.toString(),
+      }))
+    );
+    
     setFormError('');
     setIsModalOpen(true);
   };
@@ -146,39 +156,6 @@ export const AdminPurchases: React.FC = () => {
     e.preventDefault();
     setFormError('');
 
-    if (isEditMode && editingPurchase) {
-      // Handle update
-      const finalSupplierName = supplierName.trim() || 'Walk-in Supplier';
-      
-      const res = PurchaseService.updatePurchase(
-        editingPurchase.id,
-        {
-          supplierName: finalSupplierName,
-          invoiceNumber: invoiceNumber.trim() || undefined,
-          paymentStatus,
-          notes,
-        },
-        currentUser
-      );
-
-      if (res.success) {
-        addToast({
-          type: 'success',
-          title: 'Purchase Updated',
-          description: `Purchase ${editingPurchase.purchaseNumber || editingPurchase.id} updated successfully.`,
-        });
-        setIsModalOpen(false);
-        setEditingPurchase(null);
-        setIsEditMode(false);
-      } else {
-        setFormError(res.error || 'Failed to update purchase.');
-      }
-      return;
-    }
-
-    // Handle create
-    const finalSupplierName = supplierName.trim() || 'Walk-in Supplier';
-
     if (items.length === 0) {
       setFormError('Please add at least one line item.');
       return;
@@ -191,6 +168,7 @@ export const AdminPurchases: React.FC = () => {
       unitCost: parseFloat(item.unitCost as string) || 0,
     }));
 
+    // Validate all items
     for (const item of finalItems) {
       if (item.quantity <= 0) {
         setFormError('Quantity must be greater than 0 for all items.');
@@ -206,27 +184,58 @@ export const AdminPurchases: React.FC = () => {
       }
     }
 
-    const res = PurchaseService.createPurchase(
-      {
-        shopId: purchaseShopId || availableShops[0]?.id || '',
-        supplierName: finalSupplierName,
-        invoiceNumber: invoiceNumber.trim() || undefined,
-        items: finalItems,
-        paymentStatus,
-        notes,
-      },
-      currentUser
-    );
+    const finalSupplierName = supplierName.trim() || 'Walk-in Supplier';
 
-    if (res.success) {
-      addToast({
-        type: 'success',
-        title: 'Purchase Recorded & Stock Ingested',
-        description: `Order from ${finalSupplierName} recorded. Product inventories were automatically restocked.`,
-      });
-      setIsModalOpen(false);
+    if (editingPurchase) {
+      // UPDATE existing purchase with items
+      const res = PurchaseService.updatePurchase(
+        editingPurchase.id,
+        {
+          supplierName: finalSupplierName,
+          invoiceNumber: invoiceNumber.trim() || undefined,
+          paymentStatus,
+          notes,
+          items: finalItems, // Include items for stock recalculation
+        },
+        currentUser
+      );
+
+      if (res.success) {
+        addToast({
+          type: 'success',
+          title: 'Purchase Updated',
+          description: `Purchase ${editingPurchase.purchaseNumber || editingPurchase.id} updated. Stock recalculated.`,
+        });
+        setIsModalOpen(false);
+        setEditingPurchase(null);
+        setIsEditMode(false);
+      } else {
+        setFormError(res.error || 'Failed to update purchase.');
+      }
     } else {
-      setFormError(res.error || 'Failed to record purchase.');
+      // CREATE new purchase
+      const res = PurchaseService.createPurchase(
+        {
+          shopId: purchaseShopId || availableShops[0]?.id || '',
+          supplierName: finalSupplierName,
+          invoiceNumber: invoiceNumber.trim() || undefined,
+          items: finalItems,
+          paymentStatus,
+          notes,
+        },
+        currentUser
+      );
+
+      if (res.success) {
+        addToast({
+          type: 'success',
+          title: 'Purchase Recorded & Stock Ingested',
+          description: `Order from ${finalSupplierName} recorded. Product inventories were automatically restocked.`,
+        });
+        setIsModalOpen(false);
+      } else {
+        setFormError(res.error || 'Failed to record purchase.');
+      }
     }
   };
 
@@ -351,7 +360,7 @@ export const AdminPurchases: React.FC = () => {
                   <Truck className="w-5 h-5 text-blue-400" />
                 )}
                 <h3 className="text-base font-bold text-white">
-                  {isEditMode ? 'Edit Purchase Details' : 'Record Stock In / Purchase'}
+                  {editingPurchase ? 'Edit Purchase / Correct Quantity' : 'Record Stock In / Purchase'}
                 </h3>
               </div>
               <button
@@ -414,95 +423,99 @@ export const AdminPurchases: React.FC = () => {
                 </div>
               </div>
 
-              {/* Line Items Table - Only for new purchases */}
-              {!isEditMode && (
-                <div>
-                  <div className="flex items-center justify-between mb-2">
-                    <label className="block text-slate-300 font-semibold uppercase tracking-wider text-[11px]">
-                      Received Inventory Items
-                    </label>
-                    <button
-                      type="button"
-                      onClick={addItemRow}
-                      className="flex items-center gap-1 text-blue-400 hover:text-blue-300 font-semibold"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add Item</span>
-                    </button>
+              {/* Line Items Table - Always visible for both new and edit */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-slate-300 font-semibold uppercase tracking-wider text-[11px]">
+                    {isEditMode ? 'Correct Item Quantities / Costs' : 'Received Inventory Items'}
+                  </label>
+                  <button
+                    type="button"
+                    onClick={addItemRow}
+                    className="flex items-center gap-1 text-blue-400 hover:text-blue-300 font-semibold"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Item</span>
+                  </button>
+                </div>
+
+                {isEditMode && (
+                  <div className="mb-2 p-2 rounded bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[10px]">
+                    ⚠️ Warning: Changing quantities will recalculate stock. The system will reverse old quantities and apply new ones.
                   </div>
+                )}
 
-                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                    {items.map((item, idx) => {
-                      const selectedProduct = dbState.products.find(p => p.id === item.productId);
-                      
-                      return (
-                        <div
-                          key={idx}
-                          className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-2"
-                        >
-                          <div className="flex-1">
-                            <select
-                              value={item.productId}
-                              onChange={e => updateItemRow(idx, 'productId', e.target.value)}
-                              className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white"
-                            >
-                              {(shopProducts.length > 0 ? shopProducts : dbState.products).map(p => (
-                                <option key={p.id} value={p.id}>
-                                  {p.name} ({p.sku}) - Stock: {p.currentStock} {p.unit}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
+                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                  {items.map((item, idx) => {
+                    const selectedProduct = dbState.products.find(p => p.id === item.productId);
+                    
+                    return (
+                      <div
+                        key={idx}
+                        className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-2"
+                      >
+                        <div className="flex-1">
+                          <select
+                            value={item.productId}
+                            onChange={e => updateItemRow(idx, 'productId', e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white"
+                          >
+                            {(shopProducts.length > 0 ? shopProducts : dbState.products).map(p => (
+                              <option key={p.id} value={p.id}>
+                                {p.name} ({p.sku}) - Stock: {p.currentStock} {p.unit}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
 
-                          <div className="w-20">
-                            <input
-                              type="number"
-                              min="0"
-                              value={item.quantity}
-                              onChange={e => {
-                                updateItemRow(idx, 'quantity', e.target.value);
-                              }}
-                              placeholder="Qty"
-                              className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono text-center"
-                            />
-                          </div>
+                        <div className="w-20">
+                          <input
+                            type="number"
+                            min="0"
+                            value={item.quantity}
+                            onChange={e => {
+                              updateItemRow(idx, 'quantity', e.target.value);
+                            }}
+                            placeholder="Qty"
+                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono text-center"
+                          />
+                        </div>
 
-                          <div className="w-28">
-                            <input
-                              type="number"
-                              step="0.01"
-                              min="0"
-                              value={item.unitCost}
-                              onChange={e => {
-                                updateItemRow(idx, 'unitCost', e.target.value);
-                              }}
-                              placeholder="Cost"
-                              className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono"
-                            />
-                          </div>
+                        <div className="w-28">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={item.unitCost}
+                            onChange={e => {
+                              updateItemRow(idx, 'unitCost', e.target.value);
+                            }}
+                            placeholder="Cost"
+                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono"
+                          />
+                        </div>
 
-                          <div className="w-24 text-right font-mono font-bold text-white text-xs">
-                            {formatCurrency(
-                              (parseFloat(item.quantity as string) || 0) * (parseFloat(item.unitCost as string) || 0),
-                              settings.currencySymbol
-                            )}
-                          </div>
-
-                          {items.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => removeItemRow(idx)}
-                              className="text-slate-500 hover:text-rose-400 p-1"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                        <div className="w-24 text-right font-mono font-bold text-white text-xs">
+                          {formatCurrency(
+                            (parseFloat(item.quantity as string) || 0) * (parseFloat(item.unitCost as string) || 0),
+                            settings.currencySymbol
                           )}
                         </div>
-                      );
-                    })}
-                  </div>
+
+                        {items.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => removeItemRow(idx)}
+                            className="text-slate-500 hover:text-rose-400 p-1"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-              )}
+              </div>
 
               <div className="grid grid-cols-2 gap-3 pt-2">
                 <div>
@@ -533,14 +546,10 @@ export const AdminPurchases: React.FC = () => {
               {/* Total & Action */}
               <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
                 <div className="text-xs">
-                  {!isEditMode && (
-                    <>
-                      <span className="text-slate-400">Total Purchase Cost: </span>
-                      <span className="text-base font-bold font-mono text-white">
-                        {formatCurrency(calculatedTotal, settings.currencySymbol)}
-                      </span>
-                    </>
-                  )}
+                  <span className="text-slate-400">Total Purchase Cost: </span>
+                  <span className="text-base font-bold font-mono text-white">
+                    {formatCurrency(calculatedTotal, settings.currencySymbol)}
+                  </span>
                 </div>
 
                 <div className="flex gap-2">
@@ -559,7 +568,7 @@ export const AdminPurchases: React.FC = () => {
                     type="submit"
                     className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow transition"
                   >
-                    {isEditMode ? 'Update Purchase' : 'Record & Ingest Stock'}
+                    {editingPurchase ? 'Update Purchase & Recalculate Stock' : 'Record & Ingest Stock'}
                   </button>
                 </div>
               </div>
