@@ -186,6 +186,74 @@ export class PurchaseService {
   }
 
   /**
+   * Update an existing purchase's details (supplier, invoice, payment status, notes).
+   * Note: This does NOT modify items or affect stock. Only metadata is updated.
+   */
+  public static updatePurchase(
+    purchaseId: string,
+    updates: {
+      supplierName?: string;
+      invoiceNumber?: string;
+      paymentStatus?: PaymentStatus;
+      notes?: string;
+    },
+    currentUser: User
+  ): { success: boolean; purchase?: Purchase; error?: string } {
+    const purchases = db.getPurchases();
+    const index = purchases.findIndex(p => p.id === purchaseId);
+    
+    if (index === -1) {
+      return { success: false, error: 'Purchase not found.' };
+    }
+
+    const current = purchases[index];
+
+    // Check permissions - only admin or the creator can update
+    if (currentUser.role !== 'ADMIN' && current.createdByUserId !== currentUser.id) {
+      return { success: false, error: 'Permission Denied: You can only update purchases you created.' };
+    }
+
+    // Build updated purchase
+    const updatedPurchase: Purchase = {
+      ...current,
+      supplierName: updates.supplierName?.trim() || current.supplierName,
+      invoiceNumber: updates.invoiceNumber?.trim() || undefined,
+      paymentStatus: updates.paymentStatus || current.paymentStatus,
+      notes: updates.notes?.trim() || undefined,
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Update in storage
+    purchases[index] = updatedPurchase;
+    db.savePurchases(purchases);
+
+    // Queue sync operation
+    db.enqueueSync({
+      id: generateUUID(),
+      operation: 'UPDATE_PURCHASE',
+      entityType: 'PURCHASE',
+      entityId: purchaseId,
+      payload: updatedPurchase,
+      status: 'PENDING',
+      createdAt: new Date().toISOString(),
+    });
+
+    // Add audit log
+    db.addAuditLog({
+      id: generateUUID(),
+      userId: currentUser.id,
+      userName: currentUser.name,
+      action: 'UPDATE_PURCHASE',
+      details: `Updated purchase ${current.purchaseNumber} - Supplier: ${current.supplierName} → ${updatedPurchase.supplierName}, Payment: ${current.paymentStatus} → ${updatedPurchase.paymentStatus}`,
+      entityType: 'PURCHASE',
+      entityId: purchaseId,
+      timestamp: new Date().toISOString(),
+    });
+
+    return { success: true, purchase: updatedPurchase };
+  }
+
+  /**
    * Get purchases filtered by shop, supplier, date.
    */
   public static getPurchases(
