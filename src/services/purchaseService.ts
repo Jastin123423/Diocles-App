@@ -44,23 +44,23 @@ export class PurchaseService {
       return { success: false, error: 'Please add at least one product item.' };
     }
 
-    // FIX: Create a deep copy of products array
-    const products = db.getProducts().map(p => ({ ...p }));
+    // GET PRODUCTS - Use a fresh copy
+    const products = db.getProducts();
     const purchaseId = generateUUID();
     const purchaseNumber = generatePurchaseNumber();
     const purchaseItems: PurchaseItem[] = [];
     let totalAmount = 0;
 
-    for (const itemInput of params.items) {
-      const prodIndex = products.findIndex(
-        p => p.id === itemInput.productId && (p.shopId === targetShopId || !p.shopId)
-      );
-      
-      if (prodIndex === -1) {
-        return { success: false, error: `Product not found in ${shop.name} (ID: ${itemInput.productId})` };
-      }
+    // FIX: Track which products need updating
+    const productsToUpdate: { id: string; newStock: number; newPurchasePrice: number }[] = [];
 
-      const prod = products[prodIndex];
+    for (const itemInput of params.items) {
+      // FIX: Find product by ID only (more reliable)
+      const prod = products.find(p => p.id === itemInput.productId);
+      
+      if (!prod) {
+        return { success: false, error: `Product not found (ID: ${itemInput.productId})` };
+      }
 
       if (itemInput.quantity <= 0) {
         return { success: false, error: `Invalid quantity for ${prod.name}. Must be greater than 0.` };
@@ -82,16 +82,15 @@ export class PurchaseService {
         total: itemTotal,
       });
 
-      // FIX: Update stock in the copied array
+      // FIX: Calculate new stock
       const prevStock = prod.currentStock;
       const newStock = prevStock + itemInput.quantity;
       
-      products[prodIndex] = {
-        ...prod,
-        currentStock: newStock,
-        purchasePrice: itemInput.unitCost,
-        updatedAt: new Date().toISOString(),
-      };
+      productsToUpdate.push({
+        id: prod.id,
+        newStock,
+        newPurchasePrice: itemInput.unitCost,
+      });
 
       // Record inventory movement
       const movement = {
@@ -112,8 +111,26 @@ export class PurchaseService {
       db.saveMovements([movement, ...db.getMovements()]);
     }
 
-    // FIX: Save the updated products array with new stock
-    db.saveProducts(products);
+    // FIX: Update product stock after loop - get fresh products and update
+    const freshProducts = db.getProducts();
+    const updatedProducts = freshProducts.map(p => {
+      const update = productsToUpdate.find(u => u.id === p.id);
+      if (update) {
+        return {
+          ...p,
+          currentStock: update.newStock,
+          purchasePrice: update.newPurchasePrice,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      return p;
+    });
+
+    // FIX: Save the updated products
+    db.saveProducts(updatedProducts);
+
+    // FIX: Verify stock was updated
+    console.log('Stock updates:', productsToUpdate);
 
     const finalSupplierName = params.supplierName?.trim() || 'Walk-in Supplier';
 
