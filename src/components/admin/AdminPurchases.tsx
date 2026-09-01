@@ -10,10 +10,12 @@ import {
   X,
   AlertCircle,
   FileText,
+  Pencil,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { PurchaseService } from '../../services/purchaseService';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
+import type { Purchase } from '../../types';
 
 interface PurchaseItemInput {
   productId: string;
@@ -24,6 +26,8 @@ interface PurchaseItemInput {
 export const AdminPurchases: React.FC = () => {
   const { currentUser, dbState, addToast, selectedShopId, currentShop } = useApp();
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [editingPurchase, setEditingPurchase] = useState<Purchase | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
   // Purchase Form state
@@ -67,6 +71,8 @@ export const AdminPurchases: React.FC = () => {
     setInvoiceNumber('');
     setPaymentStatus('PAID');
     setNotes('');
+    setIsEditMode(false);
+    setEditingPurchase(null);
     
     const prodList = dbState.products.filter(p => p.shopId === targetShop);
     const initialProd = prodList[0] || dbState.products[0];
@@ -74,10 +80,22 @@ export const AdminPurchases: React.FC = () => {
     setItems([
       {
         productId: initialProd?.id || '',
-        quantity: '', // Empty string instead of 0
-        unitCost: '', // Empty string instead of 0
+        quantity: '',
+        unitCost: initialProd?.purchasePrice ? initialProd.purchasePrice.toString() : '',
       },
     ]);
+    setFormError('');
+    setIsModalOpen(true);
+  };
+
+  const openEditPurchase = (purchase: Purchase) => {
+    setEditingPurchase(purchase);
+    setIsEditMode(true);
+    setPurchaseShopId(purchase.shopId);
+    setSupplierName(purchase.supplierName);
+    setInvoiceNumber(purchase.invoiceNumber || '');
+    setPaymentStatus(purchase.paymentStatus);
+    setNotes(purchase.notes || '');
     setFormError('');
     setIsModalOpen(true);
   };
@@ -89,8 +107,8 @@ export const AdminPurchases: React.FC = () => {
       ...prev,
       {
         productId: prod?.id || '',
-        quantity: '', // Empty string
-        unitCost: '', // Empty string
+        quantity: '',
+        unitCost: prod?.purchasePrice ? prod.purchasePrice.toString() : '',
       },
     ]);
   };
@@ -108,7 +126,9 @@ export const AdminPurchases: React.FC = () => {
           return {
             ...item,
             productId: value,
-            unitCost: matched?.purchasePrice || '',
+            unitCost: matched?.purchasePrice !== undefined && matched?.purchasePrice !== null 
+              ? matched.purchasePrice.toString() 
+              : '',
           };
         }
         return { ...item, [field]: value };
@@ -126,7 +146,37 @@ export const AdminPurchases: React.FC = () => {
     e.preventDefault();
     setFormError('');
 
-    // Supplier name is now OPTIONAL - if empty, use "Walk-in Supplier" or "Unknown Supplier"
+    if (isEditMode && editingPurchase) {
+      // Handle update
+      const finalSupplierName = supplierName.trim() || 'Walk-in Supplier';
+      
+      const res = PurchaseService.updatePurchase(
+        editingPurchase.id,
+        {
+          supplierName: finalSupplierName,
+          invoiceNumber: invoiceNumber.trim() || undefined,
+          paymentStatus,
+          notes,
+        },
+        currentUser
+      );
+
+      if (res.success) {
+        addToast({
+          type: 'success',
+          title: 'Purchase Updated',
+          description: `Purchase ${editingPurchase.purchaseNumber || editingPurchase.id} updated successfully.`,
+        });
+        setIsModalOpen(false);
+        setEditingPurchase(null);
+        setIsEditMode(false);
+      } else {
+        setFormError(res.error || 'Failed to update purchase.');
+      }
+      return;
+    }
+
+    // Handle create
     const finalSupplierName = supplierName.trim() || 'Walk-in Supplier';
 
     if (items.length === 0) {
@@ -231,12 +281,13 @@ export const AdminPurchases: React.FC = () => {
                 <th className="py-3 px-4 font-semibold">Items Received</th>
                 <th className="py-3 px-4 font-semibold">Payment Status</th>
                 <th className="py-3 px-4 text-right font-semibold">Total Cost</th>
+                <th className="py-3 px-4 text-right font-semibold">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
               {purchases.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-10 text-center text-slate-500">
+                  <td colSpan={7} className="py-10 text-center text-slate-500">
                     <Truck className="w-8 h-8 mx-auto mb-2 opacity-40" />
                     <p>No supplier purchases recorded yet.</p>
                   </td>
@@ -271,6 +322,15 @@ export const AdminPurchases: React.FC = () => {
                     <td className="py-3.5 px-4 text-right font-mono font-bold text-white text-sm">
                       {formatCurrency(purchase.totalAmount, settings.currencySymbol)}
                     </td>
+                    <td className="py-3.5 px-4 text-right space-x-1.5">
+                      <button
+                        onClick={() => openEditPurchase(purchase)}
+                        className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium transition"
+                      >
+                        <Pencil className="w-3 h-3 inline mr-1" />
+                        Edit
+                      </button>
+                    </td>
                   </tr>
                 ))
               )}
@@ -279,17 +339,27 @@ export const AdminPurchases: React.FC = () => {
         </div>
       </div>
 
-      {/* Modal: New Purchase */}
+      {/* Modal: New/Edit Purchase */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl animate-in fade-in zoom-in-95 my-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
               <div className="flex items-center gap-2">
-                <Truck className="w-5 h-5 text-blue-400" />
-                <h3 className="text-base font-bold text-white">Record Stock In / Purchase</h3>
+                {isEditMode ? (
+                  <Pencil className="w-5 h-5 text-amber-400" />
+                ) : (
+                  <Truck className="w-5 h-5 text-blue-400" />
+                )}
+                <h3 className="text-base font-bold text-white">
+                  {isEditMode ? 'Edit Purchase Details' : 'Record Stock In / Purchase'}
+                </h3>
               </div>
               <button
-                onClick={() => setIsModalOpen(false)}
+                onClick={() => {
+                  setIsModalOpen(false);
+                  setEditingPurchase(null);
+                  setIsEditMode(false);
+                }}
                 className="text-slate-400 hover:text-white p-1"
               >
                 <X className="w-5 h-5" />
@@ -303,20 +373,22 @@ export const AdminPurchases: React.FC = () => {
             )}
 
             <form onSubmit={handleSavePurchase} className="space-y-4 text-xs">
-              <div>
-                <label className="block text-slate-300 font-medium mb-1">Target Shop / Unit *</label>
-                <select
-                  value={purchaseShopId}
-                  onChange={e => setPurchaseShopId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
-                  {availableShops.map(s => (
-                    <option key={s.id} value={s.id}>
-                      {s.name} ({s.code || 'UNIT'})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              {!isEditMode && (
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Target Shop / Unit *</label>
+                  <select
+                    value={purchaseShopId}
+                    onChange={e => setPurchaseShopId(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  >
+                    {availableShops.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.code || 'UNIT'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -342,93 +414,95 @@ export const AdminPurchases: React.FC = () => {
                 </div>
               </div>
 
-              {/* Line Items Table */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-slate-300 font-semibold uppercase tracking-wider text-[11px]">
-                    Received Inventory Items
-                  </label>
-                  <button
-                    type="button"
-                    onClick={addItemRow}
-                    className="flex items-center gap-1 text-blue-400 hover:text-blue-300 font-semibold"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add Item</span>
-                  </button>
-                </div>
+              {/* Line Items Table - Only for new purchases */}
+              {!isEditMode && (
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-slate-300 font-semibold uppercase tracking-wider text-[11px]">
+                      Received Inventory Items
+                    </label>
+                    <button
+                      type="button"
+                      onClick={addItemRow}
+                      className="flex items-center gap-1 text-blue-400 hover:text-blue-300 font-semibold"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Item</span>
+                    </button>
+                  </div>
 
-                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                  {items.map((item, idx) => {
-                    const selectedProduct = dbState.products.find(p => p.id === item.productId);
-                    
-                    return (
-                      <div
-                        key={idx}
-                        className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-2"
-                      >
-                        <div className="flex-1">
-                          <select
-                            value={item.productId}
-                            onChange={e => updateItemRow(idx, 'productId', e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white"
-                          >
-                            {(shopProducts.length > 0 ? shopProducts : dbState.products).map(p => (
-                              <option key={p.id} value={p.id}>
-                                {p.name} ({p.sku}) - Stock: {p.currentStock} {p.unit}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                  <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                    {items.map((item, idx) => {
+                      const selectedProduct = dbState.products.find(p => p.id === item.productId);
+                      
+                      return (
+                        <div
+                          key={idx}
+                          className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-2"
+                        >
+                          <div className="flex-1">
+                            <select
+                              value={item.productId}
+                              onChange={e => updateItemRow(idx, 'productId', e.target.value)}
+                              className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white"
+                            >
+                              {(shopProducts.length > 0 ? shopProducts : dbState.products).map(p => (
+                                <option key={p.id} value={p.id}>
+                                  {p.name} ({p.sku}) - Stock: {p.currentStock} {p.unit}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
 
-                        <div className="w-20">
-                          <input
-                            type="number"
-                            min="0"
-                            value={item.quantity}
-                            onChange={e => {
-                              updateItemRow(idx, 'quantity', e.target.value);
-                            }}
-                            placeholder="Qty"
-                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono text-center"
-                          />
-                        </div>
+                          <div className="w-20">
+                            <input
+                              type="number"
+                              min="0"
+                              value={item.quantity}
+                              onChange={e => {
+                                updateItemRow(idx, 'quantity', e.target.value);
+                              }}
+                              placeholder="Qty"
+                              className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono text-center"
+                            />
+                          </div>
 
-                        <div className="w-28">
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={item.unitCost}
-                            onChange={e => {
-                              updateItemRow(idx, 'unitCost', e.target.value);
-                            }}
-                            placeholder="Cost"
-                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono"
-                          />
-                        </div>
+                          <div className="w-28">
+                            <input
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={item.unitCost}
+                              onChange={e => {
+                                updateItemRow(idx, 'unitCost', e.target.value);
+                              }}
+                              placeholder="Cost"
+                              className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono"
+                            />
+                          </div>
 
-                        <div className="w-24 text-right font-mono font-bold text-white text-xs">
-                          {formatCurrency(
-                            (parseFloat(item.quantity as string) || 0) * (parseFloat(item.unitCost as string) || 0),
-                            settings.currencySymbol
+                          <div className="w-24 text-right font-mono font-bold text-white text-xs">
+                            {formatCurrency(
+                              (parseFloat(item.quantity as string) || 0) * (parseFloat(item.unitCost as string) || 0),
+                              settings.currencySymbol
+                            )}
+                          </div>
+
+                          {items.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => removeItemRow(idx)}
+                              className="text-slate-500 hover:text-rose-400 p-1"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           )}
                         </div>
-
-                        {items.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => removeItemRow(idx)}
-                            className="text-slate-500 hover:text-rose-400 p-1"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3 pt-2">
                 <div>
@@ -459,16 +533,24 @@ export const AdminPurchases: React.FC = () => {
               {/* Total & Action */}
               <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
                 <div className="text-xs">
-                  <span className="text-slate-400">Total Purchase Cost: </span>
-                  <span className="text-base font-bold font-mono text-white">
-                    {formatCurrency(calculatedTotal, settings.currencySymbol)}
-                  </span>
+                  {!isEditMode && (
+                    <>
+                      <span className="text-slate-400">Total Purchase Cost: </span>
+                      <span className="text-base font-bold font-mono text-white">
+                        {formatCurrency(calculatedTotal, settings.currencySymbol)}
+                      </span>
+                    </>
+                  )}
                 </div>
 
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    onClick={() => setIsModalOpen(false)}
+                    onClick={() => {
+                      setIsModalOpen(false);
+                      setEditingPurchase(null);
+                      setIsEditMode(false);
+                    }}
                     className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition"
                   >
                     Cancel
@@ -477,7 +559,7 @@ export const AdminPurchases: React.FC = () => {
                     type="submit"
                     className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow transition"
                   >
-                    Record & Ingest Stock
+                    {isEditMode ? 'Update Purchase' : 'Record & Ingest Stock'}
                   </button>
                 </div>
               </div>
