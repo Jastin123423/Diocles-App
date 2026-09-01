@@ -267,16 +267,52 @@ async function createSale(db: any, sale: any) {
       item.productId, item.productName, item.sku, item.unitPrice || 0,
       item.purchasePrice || 0, item.quantity || 0, item.discount || 0, item.total || 0
     ).run();
+
+    // Decrease product stock after sale
+    await db.prepare(`
+      UPDATE products 
+      SET current_stock = current_stock - ?,
+          updated_at = ?
+      WHERE id = ?
+    `).bind(
+      item.quantity || 0,
+      new Date().toISOString(),
+      item.productId
+    ).run();
   }
 }
 
 async function voidSale(db: any, payload: any) {
+  const saleId = payload.saleId || payload.id;
+  
+  // Get sale items to restore stock
+  const saleItems = await db.prepare(
+    'SELECT product_id, quantity FROM sale_items WHERE sale_id = ?'
+  ).bind(saleId).all();
+  
+  // Restore stock for each item
+  if (saleItems.results) {
+    for (const item of saleItems.results) {
+      await db.prepare(`
+        UPDATE products 
+        SET current_stock = current_stock + ?,
+            updated_at = ?
+        WHERE id = ?
+      `).bind(
+        item.quantity || 0,
+        new Date().toISOString(),
+        item.product_id
+      ).run();
+    }
+  }
+  
+  // Void the sale
   await db.prepare(`
     UPDATE sales SET status = 'VOIDED', void_reason = ?, voided_at = ?, voided_by = ?
     WHERE id = ?
   `).bind(
     payload.voidReason || '', payload.voidedAt || new Date().toISOString(),
-    payload.voidedBy || '', payload.saleId || payload.id
+    payload.voidedBy || '', saleId
   ).run();
 }
 
@@ -298,6 +334,7 @@ async function createPurchase(db: any, purchase: any) {
   ).run();
 
   for (const item of (purchase.items || [])) {
+    // Insert purchase item record
     await db.prepare(`
       INSERT INTO purchase_items (id, purchase_id, product_id, product_name, quantity, unit_cost, total)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -307,19 +344,64 @@ async function createPurchase(db: any, purchase: any) {
       item.quantity || 0, item.unitCost || 0, item.total || 0
     ).run();
 
-    // FIX: Update product stock in D1
-    await db.prepare(`
-      UPDATE products 
-      SET current_stock = current_stock + ?, 
-          purchase_price = ?,
-          updated_at = ?
-      WHERE id = ?
-    `).bind(
-      item.quantity || 0,
-      item.unitCost || 0,
-      new Date().toISOString(),
-      item.productId
-    ).run();
+    // Get current stock and price to calculate weighted average
+    const product = await db.prepare(
+      'SELECT current_stock, purchase_price FROM products WHERE id = ?'
+    ).bind(item.productId).first();
+
+    if (product) {
+      const currentStock = Number(product.current_stock) || 0;
+      const currentPrice = Number(product.purchase_price) || 0;
+      const currentTotalCost = currentStock * currentPrice;
+      const newPurchaseQty = Number(item.quantity) || 0;
+      const newUnitCost = Number(item.unitCost) || 0;
+      const newTotalCost = newPurchaseQty * newUnitCost;
+      const newTotalStock = currentStock + newPurchaseQty;
+      const newAveragePrice = newTotalStock > 0 
+        ? (currentTotalCost + newTotalCost) / newTotalStock 
+        : newUnitCost;
+
+      // Update product with average cost
+      await db.prepare(`
+        UPDATE products 
+        SET current_stock = ?, 
+            purchase_price = ?,
+            updated_at = ?
+        WHERE id = ?
+      `).bind(
+        newTotalStock,
+        Number(newAveragePrice.toFixed(2)),
+        new Date().toISOString(),
+        item.productId
+      ).run();
+
+      // Record inventory movement for stock increase
+      await db.prepare(`
+        INSERT INTO inventory_movements (
+          id, shop_id, shop_name, product_id, product_name,
+          previous_qty, change_qty, new_qty, type, reason, cost_value,
+          reference_id, user_id, user_name, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO NOTHING
+      `).bind(
+        crypto.randomUUID(),
+        purchase.shopId,
+        purchase.shopName || null,
+        item.productId,
+        item.productName,
+        currentStock,
+        newPurchaseQty,
+        newTotalStock,
+        'PURCHASE',
+        `Purchase from ${purchase.supplierName}`,
+        newUnitCost,
+        purchase.id,
+        purchase.createdByUserId,
+        purchase.createdByName,
+        purchase.createdAt || new Date().toISOString()
+      ).run();
+    }
   }
 }
 
