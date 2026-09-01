@@ -306,6 +306,20 @@ async function createPurchase(db: any, purchase: any) {
       item.id || crypto.randomUUID(), purchase.id, item.productId, item.productName,
       item.quantity || 0, item.unitCost || 0, item.total || 0
     ).run();
+
+    // FIX: Update product stock in D1
+    await db.prepare(`
+      UPDATE products 
+      SET current_stock = current_stock + ?, 
+          purchase_price = ?,
+          updated_at = ?
+      WHERE id = ?
+    `).bind(
+      item.quantity || 0,
+      item.unitCost || 0,
+      new Date().toISOString(),
+      item.productId
+    ).run();
   }
 }
 
