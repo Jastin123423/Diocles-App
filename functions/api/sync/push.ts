@@ -93,6 +93,10 @@ async function processOperation(db: any, op: any) {
       await createPurchase(db, payload);
       break;
     
+    case 'UPDATE_PURCHASE':
+      await updatePurchase(db, payload);
+      break;
+    
     case 'CREATE_EXPENSE':
       await createExpense(db, payload);
       break;
@@ -321,16 +325,16 @@ async function createPurchase(db: any, purchase: any) {
     INSERT INTO purchases (
       id, purchase_number, shop_id, shop_name, supplier_name, date,
       total_amount, payment_status, notes, invoice_number,
-      created_by_user_id, created_by_name, created_at
+      created_by_user_id, created_by_name, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO NOTHING
   `).bind(
     purchase.id, purchase.purchaseNumber, purchase.shopId, purchase.shopName || null,
     purchase.supplierName, purchase.date || new Date().toISOString().slice(0, 10),
     purchase.totalAmount || 0, purchase.paymentStatus || 'PAID', purchase.notes || null,
     purchase.invoiceNumber || null, purchase.createdByUserId, purchase.createdByName,
-    purchase.createdAt || new Date().toISOString()
+    purchase.createdAt || new Date().toISOString(), purchase.updatedAt || null
   ).run();
 
   for (const item of (purchase.items || [])) {
@@ -403,6 +407,25 @@ async function createPurchase(db: any, purchase: any) {
       ).run();
     }
   }
+}
+
+async function updatePurchase(db: any, purchase: any) {
+  await db.prepare(`
+    UPDATE purchases SET
+      supplier_name = ?,
+      invoice_number = ?,
+      payment_status = ?,
+      notes = ?,
+      updated_at = ?
+    WHERE id = ?
+  `).bind(
+    purchase.supplierName,
+    purchase.invoiceNumber || null,
+    purchase.paymentStatus || 'PAID',
+    purchase.notes || null,
+    new Date().toISOString(),
+    purchase.id
+  ).run();
 }
 
 async function createExpense(db: any, expense: any) {
