@@ -186,8 +186,8 @@ export class PurchaseService {
   }
 
   /**
-   * Update an existing purchase's details (supplier, invoice, payment status, notes).
-   * Note: This does NOT modify items or affect stock. Only metadata is updated.
+   * Update an existing purchase.
+   * Can update metadata only OR items (which triggers stock recalculation).
    */
   public static updatePurchase(
     purchaseId: string,
@@ -196,6 +196,7 @@ export class PurchaseService {
       invoiceNumber?: string;
       paymentStatus?: PaymentStatus;
       notes?: string;
+      items?: PurchaseItemInput[];
     },
     currentUser: User
   ): { success: boolean; purchase?: Purchase; error?: string } {
@@ -208,12 +209,140 @@ export class PurchaseService {
 
     const current = purchases[index];
 
-    // Check permissions - only admin or the creator can update
+    // Check permissions
     if (currentUser.role !== 'ADMIN' && current.createdByUserId !== currentUser.id) {
       return { success: false, error: 'Permission Denied: You can only update purchases you created.' };
     }
 
-    // Build updated purchase
+    // If items are being updated, recalculate stock
+    if (updates.items && updates.items.length > 0) {
+      const products = [...db.getProducts()];
+      
+      // First, reverse the OLD purchase stock (subtract old quantities)
+      for (const oldItem of current.items) {
+        const prodIndex = products.findIndex(p => p.id === oldItem.productId);
+        if (prodIndex !== -1) {
+          products[prodIndex] = {
+            ...products[prodIndex],
+            currentStock: Math.max(0, (products[prodIndex].currentStock || 0) - oldItem.quantity),
+            updatedAt: new Date().toISOString(),
+          };
+        }
+      }
+
+      // Then apply NEW quantities (add new stock with average cost)
+      const purchaseItems: PurchaseItem[] = [];
+      let totalAmount = 0;
+
+      for (const itemInput of updates.items) {
+        const prodIndex = products.findIndex(p => p.id === itemInput.productId);
+        if (prodIndex === -1) {
+          return { success: false, error: `Product not found (ID: ${itemInput.productId})` };
+        }
+
+        if (itemInput.quantity <= 0) {
+          return { success: false, error: `Invalid quantity. Must be greater than 0.` };
+        }
+
+        if (itemInput.unitCost < 0) {
+          return { success: false, error: `Unit cost cannot be negative.` };
+        }
+
+        const itemTotal = itemInput.quantity * itemInput.unitCost;
+        totalAmount += itemTotal;
+
+        purchaseItems.push({
+          id: generateUUID(),
+          productId: itemInput.productId,
+          productName: products[prodIndex].name,
+          quantity: itemInput.quantity,
+          unitCost: itemInput.unitCost,
+          total: itemTotal,
+        });
+
+        // Calculate new average cost
+        const currentStock = products[prodIndex].currentStock || 0;
+        const currentPrice = products[prodIndex].purchasePrice || 0;
+        const currentTotalCost = currentStock * currentPrice;
+        const newTotalCost = itemInput.quantity * itemInput.unitCost;
+        const newTotalStock = currentStock + itemInput.quantity;
+        const newAveragePrice = newTotalStock > 0 
+          ? (currentTotalCost + newTotalCost) / newTotalStock 
+          : itemInput.unitCost;
+
+        // Add new stock with average cost
+        products[prodIndex] = {
+          ...products[prodIndex],
+          currentStock: newTotalStock,
+          purchasePrice: Number(newAveragePrice.toFixed(2)),
+          updatedAt: new Date().toISOString(),
+        };
+
+        // Record inventory movement
+        const movement = {
+          id: generateUUID(),
+          shopId: current.shopId,
+          shopName: current.shopName,
+          productId: itemInput.productId,
+          productName: products[prodIndex].name,
+          previousQty: currentStock,
+          changeQty: itemInput.quantity,
+          newQty: newTotalStock,
+          type: 'PURCHASE_EDIT' as const,
+          reason: `Corrected PO ${current.purchaseNumber} - quantity adjusted`,
+          costValue: itemTotal,
+          userId: currentUser.id,
+          userName: currentUser.name,
+          createdAt: new Date().toISOString(),
+        };
+        db.saveMovements([movement, ...db.getMovements()]);
+      }
+
+      // Save updated products
+      db.saveProducts(products);
+
+      // Update purchase
+      const updatedPurchase: Purchase = {
+        ...current,
+        supplierName: updates.supplierName?.trim() || current.supplierName,
+        invoiceNumber: updates.invoiceNumber?.trim() || undefined,
+        paymentStatus: updates.paymentStatus || current.paymentStatus,
+        notes: updates.notes?.trim() || undefined,
+        items: purchaseItems,
+        totalAmount,
+        updatedAt: new Date().toISOString(),
+      };
+
+      purchases[index] = updatedPurchase;
+      db.savePurchases(purchases);
+
+      // Queue sync
+      db.enqueueSync({
+        id: generateUUID(),
+        operation: 'UPDATE_PURCHASE',
+        entityType: 'PURCHASE',
+        entityId: purchaseId,
+        payload: updatedPurchase,
+        status: 'PENDING',
+        createdAt: new Date().toISOString(),
+      });
+
+      // Audit log
+      db.addAuditLog({
+        id: generateUUID(),
+        userId: currentUser.id,
+        userName: currentUser.name,
+        action: 'UPDATE_PURCHASE_ITEMS',
+        details: `Updated purchase items for ${current.purchaseNumber}. Stock recalculated.`,
+        entityType: 'PURCHASE',
+        entityId: purchaseId,
+        timestamp: new Date().toISOString(),
+      });
+
+      return { success: true, purchase: updatedPurchase };
+    }
+
+    // If only basic info updated (no items)
     const updatedPurchase: Purchase = {
       ...current,
       supplierName: updates.supplierName?.trim() || current.supplierName,
@@ -223,11 +352,9 @@ export class PurchaseService {
       updatedAt: new Date().toISOString(),
     };
 
-    // Update in storage
     purchases[index] = updatedPurchase;
     db.savePurchases(purchases);
 
-    // Queue sync operation
     db.enqueueSync({
       id: generateUUID(),
       operation: 'UPDATE_PURCHASE',
@@ -238,13 +365,12 @@ export class PurchaseService {
       createdAt: new Date().toISOString(),
     });
 
-    // Add audit log
     db.addAuditLog({
       id: generateUUID(),
       userId: currentUser.id,
       userName: currentUser.name,
       action: 'UPDATE_PURCHASE',
-      details: `Updated purchase ${current.purchaseNumber} - Supplier: ${current.supplierName} → ${updatedPurchase.supplierName}, Payment: ${current.paymentStatus} → ${updatedPurchase.paymentStatus}`,
+      details: `Updated purchase ${current.purchaseNumber} metadata`,
       entityType: 'PURCHASE',
       entityId: purchaseId,
       timestamp: new Date().toISOString(),
