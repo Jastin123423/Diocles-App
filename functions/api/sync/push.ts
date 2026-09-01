@@ -410,12 +410,70 @@ async function createPurchase(db: any, purchase: any) {
 }
 
 async function updatePurchase(db: any, purchase: any) {
+  // First, reverse old stock
+  const oldPurchase = await db.prepare(
+    'SELECT * FROM purchase_items WHERE purchase_id = ?'
+  ).bind(purchase.id).all();
+
+  if (oldPurchase.results) {
+    for (const oldItem of oldPurchase.results) {
+      await db.prepare(`
+        UPDATE products 
+        SET current_stock = current_stock - ?,
+            updated_at = ?
+        WHERE id = ?
+      `).bind(
+        oldItem.quantity || 0, 
+        new Date().toISOString(), 
+        oldItem.product_id
+      ).run();
+
+      // Record inventory movement for stock reversal
+      const product = await db.prepare(
+        'SELECT current_stock FROM products WHERE id = ?'
+      ).bind(oldItem.product_id).first();
+      
+      if (product) {
+        await db.prepare(`
+          INSERT INTO inventory_movements (
+            id, shop_id, shop_name, product_id, product_name,
+            previous_qty, change_qty, new_qty, type, reason, cost_value,
+            reference_id, user_id, user_name, created_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO NOTHING
+        `).bind(
+          crypto.randomUUID(),
+          purchase.shopId,
+          purchase.shopName || null,
+          oldItem.product_id,
+          oldItem.product_name,
+          Number(product.current_stock) + Number(oldItem.quantity || 0),
+          -Number(oldItem.quantity || 0),
+          Number(product.current_stock),
+          'PURCHASE_EDIT',
+          `Purchase edit - reversed old quantity`,
+          Number(oldItem.unit_cost || 0),
+          purchase.id,
+          purchase.createdByUserId,
+          purchase.createdByName,
+          new Date().toISOString()
+        ).run();
+      }
+    }
+  }
+
+  // Delete old purchase items
+  await db.prepare('DELETE FROM purchase_items WHERE purchase_id = ?').bind(purchase.id).run();
+
+  // Update purchase metadata
   await db.prepare(`
     UPDATE purchases SET
       supplier_name = ?,
       invoice_number = ?,
       payment_status = ?,
       notes = ?,
+      total_amount = ?,
       updated_at = ?
     WHERE id = ?
   `).bind(
@@ -423,9 +481,86 @@ async function updatePurchase(db: any, purchase: any) {
     purchase.invoiceNumber || null,
     purchase.paymentStatus || 'PAID',
     purchase.notes || null,
+    purchase.totalAmount || 0,
     new Date().toISOString(),
     purchase.id
   ).run();
+
+  // Insert new items and update stock
+  for (const item of (purchase.items || [])) {
+    // Insert new purchase item
+    await db.prepare(`
+      INSERT INTO purchase_items (id, purchase_id, product_id, product_name, quantity, unit_cost, total)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      item.id || crypto.randomUUID(), 
+      purchase.id, 
+      item.productId, 
+      item.productName,
+      item.quantity || 0, 
+      item.unitCost || 0, 
+      item.total || 0
+    ).run();
+
+    // Get current product info for average cost calculation
+    const product = await db.prepare(
+      'SELECT current_stock, purchase_price FROM products WHERE id = ?'
+    ).bind(item.productId).first();
+
+    if (product) {
+      const currentStock = Number(product.current_stock) || 0;
+      const currentPrice = Number(product.purchase_price) || 0;
+      const currentTotalCost = currentStock * currentPrice;
+      const newPurchaseQty = Number(item.quantity) || 0;
+      const newUnitCost = Number(item.unitCost) || 0;
+      const newTotalCost = newPurchaseQty * newUnitCost;
+      const newTotalStock = currentStock + newPurchaseQty;
+      const newAveragePrice = newTotalStock > 0 
+        ? (currentTotalCost + newTotalCost) / newTotalStock 
+        : newUnitCost;
+
+      // Update product with new stock and average cost
+      await db.prepare(`
+        UPDATE products 
+        SET current_stock = ?,
+            purchase_price = ?,
+            updated_at = ?
+        WHERE id = ?
+      `).bind(
+        newTotalStock,
+        Number(newAveragePrice.toFixed(2)),
+        new Date().toISOString(),
+        item.productId
+      ).run();
+
+      // Record inventory movement for new stock
+      await db.prepare(`
+        INSERT INTO inventory_movements (
+          id, shop_id, shop_name, product_id, product_name,
+          previous_qty, change_qty, new_qty, type, reason, cost_value,
+          reference_id, user_id, user_name, created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO NOTHING
+      `).bind(
+        crypto.randomUUID(),
+        purchase.shopId,
+        purchase.shopName || null,
+        item.productId,
+        item.productName,
+        currentStock,
+        newPurchaseQty,
+        newTotalStock,
+        'PURCHASE_EDIT',
+        `Purchase edit - applied corrected quantity`,
+        newUnitCost,
+        purchase.id,
+        purchase.createdByUserId,
+        purchase.createdByName,
+        new Date().toISOString()
+      ).run();
+    }
+  }
 }
 
 async function createExpense(db: any, expense: any) {
