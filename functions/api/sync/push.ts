@@ -85,6 +85,10 @@ async function processOperation(db: any, op: any) {
       await createSale(db, payload);
       break;
     
+    case 'UPDATE_SALE':
+      await updateSale(db, payload);
+      break;
+    
     case 'VOID_SALE':
       await voidSale(db, payload);
       break;
@@ -120,6 +124,14 @@ async function processOperation(db: any, op: any) {
     
     case 'UPDATE_DEBT':
       await updateDebt(db, payload);
+      break;
+    
+    case 'CREATE_SALE_EDIT_REQUEST':
+      await createSaleEditRequest(db, payload);
+      break;
+    
+    case 'REVIEW_SALE_EDIT_REQUEST':
+      await reviewSaleEditRequest(db, payload);
       break;
     
     default:
@@ -273,6 +285,82 @@ async function createSale(db: any, sale: any) {
     ).run();
 
     // Decrease product stock after sale
+    await db.prepare(`
+      UPDATE products 
+      SET current_stock = current_stock - ?,
+          updated_at = ?
+      WHERE id = ?
+    `).bind(
+      item.quantity || 0,
+      new Date().toISOString(),
+      item.productId
+    ).run();
+  }
+}
+
+async function updateSale(db: any, sale: any) {
+  // First, reverse old stock (add back quantities)
+  const oldSaleItems = await db.prepare(
+    'SELECT product_id, quantity FROM sale_items WHERE sale_id = ?'
+  ).bind(sale.id).all();
+
+  if (oldSaleItems.results) {
+    for (const oldItem of oldSaleItems.results) {
+      await db.prepare(`
+        UPDATE products 
+        SET current_stock = current_stock + ?,
+            updated_at = ?
+        WHERE id = ?
+      `).bind(
+        oldItem.quantity || 0,
+        new Date().toISOString(),
+        oldItem.product_id
+      ).run();
+    }
+  }
+
+  // Delete old sale items
+  await db.prepare('DELETE FROM sale_items WHERE sale_id = ?').bind(sale.id).run();
+
+  // Update sale metadata
+  await db.prepare(`
+    UPDATE sales SET
+      subtotal = ?,
+      discount = ?,
+      total = ?,
+      cost_of_goods = ?,
+      gross_profit = ?,
+      amount_received = ?,
+      change = ?,
+      notes = ?
+    WHERE id = ?
+  `).bind(
+    sale.subtotal || 0,
+    sale.discount || 0,
+    sale.total || 0,
+    sale.costOfGoods || 0,
+    sale.grossProfit || 0,
+    sale.amountReceived || 0,
+    sale.change || 0,
+    sale.notes || null,
+    sale.id
+  ).run();
+
+  // Insert new sale items and decrease stock
+  for (const item of (sale.items || [])) {
+    await db.prepare(`
+      INSERT INTO sale_items (
+        id, sale_id, shop_id, product_id, product_name, sku,
+        unit_price, purchase_price, quantity, discount, total
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      item.id || crypto.randomUUID(), sale.id, item.shopId || sale.shopId,
+      item.productId, item.productName, item.sku, item.unitPrice || 0,
+      item.purchasePrice || 0, item.quantity || 0, item.discount || 0, item.total || 0
+    ).run();
+
+    // Decrease product stock
     await db.prepare(`
       UPDATE products 
       SET current_stock = current_stock - ?,
@@ -561,6 +649,52 @@ async function updatePurchase(db: any, purchase: any) {
       ).run();
     }
   }
+}
+
+async function createSaleEditRequest(db: any, request: any) {
+  await db.prepare(`
+    INSERT INTO sale_edit_requests (
+      id, sale_id, requested_by_user_id, requested_by_name,
+      original_values, new_values, reason, status,
+      reviewed_by_user_id, reviewed_by_name, review_note,
+      created_at, reviewed_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO NOTHING
+  `).bind(
+    request.id,
+    request.saleId,
+    request.requestedByUserId,
+    request.requestedByName,
+    JSON.stringify(request.originalValues),
+    JSON.stringify(request.newValues),
+    request.reason,
+    request.status || 'PENDING',
+    request.reviewedByUserId || null,
+    request.reviewedByName || null,
+    request.reviewNote || null,
+    request.createdAt || new Date().toISOString(),
+    request.reviewedAt || null
+  ).run();
+}
+
+async function reviewSaleEditRequest(db: any, request: any) {
+  await db.prepare(`
+    UPDATE sale_edit_requests SET
+      status = ?,
+      reviewed_by_user_id = ?,
+      reviewed_by_name = ?,
+      review_note = ?,
+      reviewed_at = ?
+    WHERE id = ?
+  `).bind(
+    request.status || 'PENDING',
+    request.reviewedByUserId || null,
+    request.reviewedByName || null,
+    request.reviewNote || null,
+    request.reviewedAt || new Date().toISOString(),
+    request.id
+  ).run();
 }
 
 async function createExpense(db: any, expense: any) {
