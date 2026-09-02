@@ -56,13 +56,37 @@ export const AdminPurchases: React.FC = () => {
   // Available products for the selected purchase shop
   const shopProducts = dbState.products.filter(p => !purchaseShopId || purchaseShopId === 'ALL' || p.shopId === purchaseShopId);
 
+  // Get purchases with local filtering for enhanced search
   const purchases = PurchaseService.getPurchases(
     {
       shopId: isSeller ? (currentShop?.id || selectedShopId) : (selectedShopId === 'ALL' ? undefined : selectedShopId),
-      search: searchQuery,
     },
     currentUser
-  );
+  ).filter(purchase => {
+    if (!searchQuery.trim()) return true;
+    
+    const q = searchQuery.trim().toLowerCase();
+    
+    // Search by supplier name
+    if (purchase.supplierName.toLowerCase().includes(q)) return true;
+    
+    // Search by purchase number
+    if (purchase.purchaseNumber.toLowerCase().includes(q)) return true;
+    
+    // Search by invoice number
+    if (purchase.invoiceNumber && purchase.invoiceNumber.toLowerCase().includes(q)) return true;
+    
+    // Search by product names in items
+    if ((purchase.items || []).some(item => 
+      item.productName.toLowerCase().includes(q) ||
+      item.productId.toLowerCase().includes(q)
+    )) return true;
+    
+    // Search by shop name
+    if (purchase.shopName && purchase.shopName.toLowerCase().includes(q)) return true;
+    
+    return false;
+  });
 
   const openNewPurchaseModal = () => {
     const targetShop = currentShop?.id || (selectedShopId !== 'ALL' ? selectedShopId : availableShops[0]?.id) || '';
@@ -268,7 +292,7 @@ export const AdminPurchases: React.FC = () => {
             type="text"
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
-            placeholder="Search supplier, reference #..."
+            placeholder="Search by supplier, product, or invoice #..."
             className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
           />
         </div>
