@@ -226,4 +226,73 @@ export class ShopService {
       return { success: false, error: err.message || 'Failed to toggle shop status' };
     }
   }
+
+  /**
+   * Admin deletes a shop permanently.
+   * This also removes the shop from all users' assignedShopIds.
+   */
+  public static deleteShop(
+    shopId: string,
+    currentUser: User
+  ): { success: boolean; error?: string } {
+    if (currentUser.role !== 'ADMIN') {
+      return { success: false, error: 'Permission Denied: Only Admin can delete shops.' };
+    }
+
+    const shops = db.getShops();
+    const shop = shops.find(s => s.id === shopId);
+    
+    if (!shop) {
+      return { success: false, error: 'Shop not found.' };
+    }
+
+    // Remove shop from shops list
+    const updatedShops = shops.filter(s => s.id !== shopId);
+    db.saveShops(updatedShops);
+
+    // Remove shopId from all users' assignedShopIds
+    const users = db.getUsers();
+    const updatedUsers = users.map(u => ({
+      ...u,
+      assignedShopIds: (u.assignedShopIds || []).filter(id => id !== shopId),
+    }));
+    db.saveUsers(updatedUsers);
+
+    // Remove products in this shop
+    const products = db.getProducts();
+    const updatedProducts = products.filter(p => p.shopId !== shopId);
+    db.saveProducts(updatedProducts);
+
+    // Remove categories in this shop
+    const categories = db.getCategories?.() || [];
+    const updatedCategories = categories.filter(c => c.shopId !== shopId);
+    if (db.saveCategories) {
+      db.saveCategories(updatedCategories);
+    }
+
+    // Sync to cloud
+    db.enqueueSync({
+      id: `sync-${Date.now()}`,
+      operation: 'DELETE_SHOP',
+      entityType: 'SHOP',
+      entityId: shopId,
+      payload: { id: shopId },
+      status: 'PENDING',
+      createdAt: new Date().toISOString(),
+    });
+
+    // Audit log
+    db.addAuditLog({
+      id: `audit-${Date.now()}`,
+      userId: currentUser.id,
+      userName: currentUser.name,
+      action: 'DELETE_SHOP',
+      details: `Deleted shop: ${shop.name} (${shop.code || 'NO-CODE'})`,
+      entityType: 'SHOP',
+      entityId: shopId,
+      timestamp: new Date().toISOString(),
+    });
+
+    return { success: true };
+  }
 }
