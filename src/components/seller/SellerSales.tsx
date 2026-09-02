@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Search, Receipt, Calendar, Filter, Eye, Pencil, X } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Search, Receipt, Calendar, Filter, Eye, Pencil, X, CheckCircle } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { SalesService, CartItemInput } from '../../services/salesService';
 import { Sale } from '../../types';
@@ -17,11 +17,29 @@ export const SellerSales: React.FC = () => {
   const [editItems, setEditItems] = useState<CartItemInput[]>([]);
   const [editReason, setEditReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Track which sales have pending edit requests
+  const [submittedSaleIds, setSubmittedSaleIds] = useState<Set<string>>(new Set());
 
   if (!currentUser) return null;
 
   const settings = dbState.settings;
   const products = dbState.products || [];
+
+  // Get pending edit requests for this seller
+  const pendingRequests = useMemo(() => {
+    const requests = dbState.saleEditRequests || [];
+    return requests.filter(
+      r => r.requestedByUserId === currentUser.id && r.status === 'PENDING'
+    );
+  }, [dbState.saleEditRequests, currentUser.id]);
+
+  // Combine with local state
+  const pendingSaleIds = useMemo(() => {
+    const ids = new Set(submittedSaleIds);
+    pendingRequests.forEach(r => ids.add(r.saleId));
+    return ids;
+  }, [submittedSaleIds, pendingRequests]);
 
   // Query sales restricted to current seller
   const sales = SalesService.getSales(
@@ -57,26 +75,35 @@ export const SellerSales: React.FC = () => {
     if (!editReason.trim()) {
       addToast({
         type: 'warning',
-        title: 'Reason Required',
-        description: 'Please provide a reason for requesting this edit.',
+        title: 'Sababu Inahitajika',
+        description: 'Tafadhali toa sababu ya kuomba marekebisho haya.',
       });
       return;
     }
 
     setIsSubmitting(true);
+    
     const result = SalesService.requestSaleEdit(
       editingSale.id,
       editItems,
       editReason,
       currentUser
     );
+    
     setIsSubmitting(false);
 
     if (result.success) {
+      // Add sale ID to submitted set
+      setSubmittedSaleIds(prev => {
+        const newSet = new Set(prev);
+        newSet.add(editingSale.id);
+        return newSet;
+      });
+      
       addToast({
         type: 'success',
-        title: 'Edit Request Sent',
-        description: 'Your edit request has been sent to admin for approval.',
+        title: 'Ombi Limesafirishwa',
+        description: 'Ombi lako la marekebisho limesafirishwa kwa admin kwa idhini.',
       });
       setEditingSale(null);
       setEditItems([]);
@@ -84,8 +111,8 @@ export const SellerSales: React.FC = () => {
     } else {
       addToast({
         type: 'error',
-        title: 'Request Failed',
-        description: result.error || 'Could not submit edit request.',
+        title: 'Ombi Limeshindikana',
+        description: result.error || 'Haikuweza kutuma ombi la marekebisho.',
       });
     }
   };
@@ -206,6 +233,7 @@ export const SellerSales: React.FC = () => {
               ) : (
                 sales.map(sale => {
                   const isVoided = sale.status === 'VOIDED';
+                  const hasPendingRequest = pendingSaleIds.has(sale.id);
                   
                   return (
                     <tr key={sale.id} className={`hover:bg-slate-850/60 transition ${isVoided ? 'opacity-65' : ''}`}>
@@ -254,13 +282,20 @@ export const SellerSales: React.FC = () => {
                           <span>View</span>
                         </button>
                         {!isVoided && (
-                          <button
-                            onClick={() => openEditRequest(sale)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-amber-500/15 hover:bg-amber-600 text-amber-300 hover:text-white text-[11px] font-semibold border border-amber-500/30 transition"
-                          >
-                            <Pencil className="w-3 h-3" />
-                            <span>Request Edit</span>
-                          </button>
+                          hasPendingRequest ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-amber-500/10 text-amber-400 text-[11px] font-semibold border border-amber-500/20">
+                              <CheckCircle className="w-3 h-3" />
+                              <span>Submitted</span>
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => openEditRequest(sale)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-amber-500/15 hover:bg-amber-600 text-amber-300 hover:text-white text-[11px] font-semibold border border-amber-500/30 transition"
+                            >
+                              <Pencil className="w-3 h-3" />
+                              <span>Request Edit</span>
+                            </button>
+                          )
                         )}
                       </td>
                     </tr>
@@ -292,12 +327,12 @@ export const SellerSales: React.FC = () => {
 
             <div className="space-y-3 mb-4">
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Reason for Edit *</label>
+                <label className="block text-slate-300 font-medium mb-1">Sababu ya Marekebisho *</label>
                 <input
                   type="text"
                   value={editReason}
                   onChange={e => setEditReason(e.target.value)}
-                  placeholder="e.g. Wrong quantity entered, customer returned item..."
+                  placeholder="Mfano: Kiasi kimewekwa vibaya, mteja amerudisha bidhaa..."
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
                 />
               </div>
@@ -312,14 +347,18 @@ export const SellerSales: React.FC = () => {
                         <span className="text-slate-500 text-[10px] block">{product?.sku || ''}</span>
                       </div>
                       <div className="w-20">
-                        <label className="text-[10px] text-slate-400 block">Qty</label>
+                        <label className="text-[10px] text-slate-400 block">Idadi</label>
                         <input
                           type="number"
-                          min="1"
+                          min="0"
                           value={item.quantity}
                           onChange={e => {
+                            const val = e.target.value;
                             const newItems = [...editItems];
-                            newItems[idx] = { ...newItems[idx], quantity: parseInt(e.target.value) || 0 };
+                            newItems[idx] = { 
+                              ...newItems[idx], 
+                              quantity: val === '' ? '' as any : parseInt(val) || 0 
+                            };
                             setEditItems(newItems);
                           }}
                           className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono text-center text-xs"
@@ -333,8 +372,12 @@ export const SellerSales: React.FC = () => {
                           step="0.01"
                           value={item.unitPrice}
                           onChange={e => {
+                            const val = e.target.value;
                             const newItems = [...editItems];
-                            newItems[idx] = { ...newItems[idx], unitPrice: parseFloat(e.target.value) || 0 };
+                            newItems[idx] = { 
+                              ...newItems[idx], 
+                              unitPrice: val === '' ? '' as any : parseFloat(val) || 0 
+                            };
                             setEditItems(newItems);
                           }}
                           className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono text-xs"
@@ -348,8 +391,12 @@ export const SellerSales: React.FC = () => {
                           step="0.01"
                           value={item.discount || 0}
                           onChange={e => {
+                            const val = e.target.value;
                             const newItems = [...editItems];
-                            newItems[idx] = { ...newItems[idx], discount: parseFloat(e.target.value) || 0 };
+                            newItems[idx] = { 
+                              ...newItems[idx], 
+                              discount: val === '' ? 0 : parseFloat(val) || 0 
+                            };
                             setEditItems(newItems);
                           }}
                           className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono text-xs"
