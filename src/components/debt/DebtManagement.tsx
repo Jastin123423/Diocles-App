@@ -267,17 +267,36 @@ export const DebtManagement: React.FC = () => {
     }
   };
 
-  // Handle Delete
+  // Handle Delete - Admin only
   const handleConfirmDelete = () => {
     if (!deletingDebt || !currentUser) return;
 
-    DebtService.deleteDebt(deletingDebt.id, currentUser);
+    // Check if admin
+    if (currentUser.role !== 'ADMIN') {
+      addToast({
+        type: 'error',
+        title: 'Imeshindikana Kufuta',
+        description: 'Ni Admin pekee anaweza kufuta rekodi za madeni.',
+      });
+      setDeletingDebt(null);
+      return;
+    }
 
-    addToast({
-      type: 'info',
-      title: 'Deni Limefutwa',
-      description: `Rekodi ya ${deletingDebt.debtorName} imefutwa.`,
-    });
+    const result = DebtService.deleteDebt(deletingDebt.id, currentUser);
+
+    if (result) {
+      addToast({
+        type: 'success',
+        title: 'Deni Limefutwa',
+        description: `Rekodi ya ${deletingDebt.debtorName} imefutwa kwa mafanikio.`,
+      });
+    } else {
+      addToast({
+        type: 'error',
+        title: 'Imeshindikana Kufuta',
+        description: 'Rekodi ya deni haikupatikana au imeshindikana kufutwa.',
+      });
+    }
 
     setDeletingDebt(null);
   };
@@ -586,6 +605,7 @@ export const DebtManagement: React.FC = () => {
                     const paidAmount = debt.paidAmount || (isPaid ? debt.amount : 0);
                     const remainingAmount = debt.remainingAmount !== undefined ? debt.remainingAmount : (isPaid ? 0 : Math.max(0, debt.amount - paidAmount));
                     const paymentsCount = debt.payments?.length || (paidAmount > 0 ? 1 : 0);
+                    const isAdmin = currentUser?.role === 'ADMIN';
 
                     return (
                       <tr
@@ -747,13 +767,15 @@ export const DebtManagement: React.FC = () => {
                               <Edit2 className="w-3.5 h-3.5" />
                             </button>
 
-                            <button
-                              onClick={() => setDeletingDebt(debt)}
-                              className="p-1.5 rounded hover:bg-rose-900/40 text-slate-400 hover:text-rose-400 transition"
-                              title="Futa rekodi"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            {isAdmin && (
+                              <button
+                                onClick={() => setDeletingDebt(debt)}
+                                className="p-1.5 rounded hover:bg-rose-900/40 text-slate-400 hover:text-rose-400 transition"
+                                title="Futa rekodi (Admin only)"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -1280,6 +1302,8 @@ export const DebtManagement: React.FC = () => {
 
               <p className="text-xs text-slate-300 mb-4">
                 Una uhakika unataka kufuta rekodi hii ya deni la {formatCurrency(deletingDebt.amount, settings.currencySymbol)} ({deletingDebt.productDescription || 'bidhaa'})?
+                <br /><br />
+                <strong className="text-rose-400">Onyo:</strong> Ufutaji huu hauwezi kutenduliwa.
               </p>
 
               <div className="flex items-center justify-end gap-2.5">
