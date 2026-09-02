@@ -52,6 +52,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
   
   const isSyncingRef = useRef<boolean>(false);
+  const lastPullTimeRef = useRef<number>(0);
+  const PULL_INTERVAL = 60000; // 60 seconds between pulls
 
   const setSelectedShopId = (shopId: string) => {
     setSelectedShopIdState(shopId);
@@ -107,7 +109,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => unsubscribe();
   }, [currentUser]);
 
-  // LIVE SYNC: Continuous sync every 2 seconds when online
+  // OPTIMIZED SYNC: 
+  // - Push pending items immediately (if any)
+  // - Pull only every 60 seconds (not every 2 seconds)
   useEffect(() => {
     const liveSync = async () => {
       if (isSyncingRef.current) return;
@@ -119,21 +123,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           isSyncingRef.current = true;
           
           const pendingCount = SyncService.getPendingCount();
+          const now = Date.now();
+          const timeSinceLastPull = now - lastPullTimeRef.current;
+          const shouldPull = timeSinceLastPull >= PULL_INTERVAL;
+          
+          // PUSH: Always push if there are pending items
           if (pendingCount > 0) {
             await SyncService.processSyncQueue(currentUser || undefined);
           }
           
-          const pullResult = await CloudflareApi.pullSync();
-          
-          if (pullResult.success && pullResult.data) {
-            SyncService.applyCloudData(pullResult.data);
+          // PULL: Only pull every 60 seconds
+          if (shouldPull) {
+            const pullResult = await CloudflareApi.pullSync();
             
-            const now = new Date().toISOString();
-            localStorage.setItem('omnibiz_last_synced_at', now);
+            if (pullResult.success && pullResult.data) {
+              SyncService.applyCloudData(pullResult.data);
+              
+              const nowISO = new Date().toISOString();
+              localStorage.setItem('omnibiz_last_synced_at', nowISO);
+              
+              const state = db.getState();
+              setDbState({ ...state });
+              setSyncStatus(SyncService.getSyncStatus());
+            }
             
-            const state = db.getState();
-            setDbState({ ...state });
-            setSyncStatus(SyncService.getSyncStatus());
+            lastPullTimeRef.current = now;
           }
           
           isSyncingRef.current = false;
@@ -144,8 +158,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     };
 
+    // Initial check
     liveSync();
-    const interval = setInterval(liveSync, 2000);
+    
+    // Check every 10 seconds for pending pushes
+    // But only pull every 60 seconds
+    const interval = setInterval(liveSync, 10000);
+    
     return () => clearInterval(interval);
   }, [currentUser]);
 
