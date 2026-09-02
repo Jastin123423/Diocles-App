@@ -138,6 +138,10 @@ async function processOperation(db: any, op: any) {
       await updateDebt(db, payload);
       break;
     
+    case 'DELETE_DEBT':
+      await deleteDebt(db, payload);
+      break;
+    
     case 'CREATE_SALE_EDIT_REQUEST':
       await createSaleEditRequest(db, payload);
       break;
@@ -177,6 +181,13 @@ async function deleteProduct(db: any, payload: any) {
 
 async function deleteSeller(db: any, payload: any) {
   await db.prepare('DELETE FROM users WHERE id = ? AND role = ?').bind(payload.id, 'SELLER').run();
+}
+
+async function deleteDebt(db: any, payload: any) {
+  // Delete related payments first
+  await db.prepare('DELETE FROM debt_payments WHERE debt_id = ?').bind(payload.id).run();
+  // Delete the debt
+  await db.prepare('DELETE FROM debts WHERE id = ?').bind(payload.id).run();
 }
 
 async function upsertShop(db: any, shop: any) {
