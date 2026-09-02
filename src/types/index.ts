@@ -2,6 +2,25 @@ export type UserRole = 'ADMIN' | 'SELLER';
 
 export type UserStatus = 'ACTIVE' | 'INACTIVE';
 
+// ==========================================
+// SELLER PERMISSIONS (GRANULAR ACCESS CONTROL)
+// ==========================================
+export interface SellerPermissions {
+  canEditProducts?: boolean;      // Edit existing products
+  canDeleteProducts?: boolean;    // Delete products
+  canViewExpenses?: boolean;      // View expenses
+  canRecordExpenses?: boolean;    // Record expenses
+  canManageInventory?: boolean;   // Stock adjustments
+  canEditSales?: boolean;         // Edit sales without approval
+  canDeleteSales?: boolean;       // Void sales
+  canManageDebts?: boolean;       // Manage all debts (not just own)
+  canViewReports?: boolean;       // View financial reports
+  canManageShops?: boolean;       // Manage shops
+  canManageSellers?: boolean;     // Manage other sellers
+  canRecordPurchases?: boolean;   // Record purchases
+  canViewPurchases?: boolean;     // View purchases
+}
+
 export interface User {
   id: string;
   username: string;
@@ -12,6 +31,7 @@ export interface User {
   status: UserStatus;
   assignedShopIds?: string[]; // Multiple shop IDs assigned to this user
   avatarUrl?: string; // URL to user's avatar image
+  permissions?: SellerPermissions; // NEW: Granular permissions for sellers
   createdAt: string;
   updatedAt: string;
 }
