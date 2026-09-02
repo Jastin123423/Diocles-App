@@ -16,13 +16,14 @@ import {
   Camera,
   Upload,
   Trash2,
+  Key,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { SellerService } from '../../services/sellerService';
 import { AuthService } from '../../services/authService';
 import { StorageService } from '../../db/storage';
 import { CloudflareApi } from '../../services/cloudflareApi';
-import { User } from '../../types';
+import { User, SellerPermissions } from '../../types';
 import { SELLER_COLORS, getSellerColorById } from '../../utils/colors';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 
@@ -42,6 +43,7 @@ export const AdminSellers: React.FC = () => {
   const [password, setPassword] = useState('');
   const [selectedColor, setSelectedColor] = useState('blue');
   const [assignedShopIds, setAssignedShopIds] = useState<string[]>([]);
+  const [sellerPermissions, setSellerPermissions] = useState<SellerPermissions>({});
   const [formError, setFormError] = useState('');
 
   // Password reset state
@@ -103,14 +105,10 @@ export const AdminSellers: React.FC = () => {
     setIsUploadingAvatar(true);
     
     try {
-      // Compress image to 200x200
       const compressed = await compressImage(file, 200, 200);
-      
-      // Upload to R2
       const result = await CloudflareApi.uploadImage(compressed, 'seller', sellerId);
       
       if (result.success) {
-        // Update local user
         const users = StorageService.getUsers();
         const userIndex = users.findIndex(u => u.id === sellerId);
         if (userIndex !== -1) {
@@ -134,7 +132,6 @@ export const AdminSellers: React.FC = () => {
     } finally {
       setIsUploadingAvatar(false);
       setUploadingSellerId(null);
-      // Reset file input
       if (avatarInputRef.current) {
         avatarInputRef.current.value = '';
       }
@@ -144,7 +141,6 @@ export const AdminSellers: React.FC = () => {
   const handleAvatarClick = (sellerId: string) => {
     if (avatarInputRef.current) {
       avatarInputRef.current.click();
-      // Store seller ID for the upload handler
       avatarInputRef.current.dataset.sellerId = sellerId;
     }
   };
@@ -162,9 +158,9 @@ export const AdminSellers: React.FC = () => {
     setUsername('');
     setPassword('');
     setSelectedColor('blue');
-    // Default assign all active shops or first active shop
     const activeShopIds = allShops.filter(s => s.status === 'ACTIVE').map(s => s.id);
     setAssignedShopIds(activeShopIds.length > 0 ? [activeShopIds[0]] : []);
+    setSellerPermissions({});
     setFormError('');
     setIsAddModalOpen(true);
   };
@@ -174,6 +170,7 @@ export const AdminSellers: React.FC = () => {
     setName(s.name);
     setSelectedColor(s.color || 'blue');
     setAssignedShopIds(s.assignedShopIds || []);
+    setSellerPermissions(s.permissions || {});
     setFormError('');
     setIsEditModalOpen(true);
   };
@@ -189,6 +186,13 @@ export const AdminSellers: React.FC = () => {
     setAssignedShopIds(prev =>
       prev.includes(shopId) ? prev.filter(id => id !== shopId) : [...prev, shopId]
     );
+  };
+
+  const togglePermission = (key: keyof SellerPermissions) => {
+    setSellerPermissions(prev => ({
+      ...prev,
+      [key]: !prev[key],
+    }));
   };
 
   const handleCreateSeller = async (e: React.FormEvent) => {
@@ -212,6 +216,7 @@ export const AdminSellers: React.FC = () => {
         password,
         color: selectedColor,
         assignedShopIds,
+        permissions: sellerPermissions,
       },
       currentUser
     );
@@ -243,6 +248,7 @@ export const AdminSellers: React.FC = () => {
         name: name.trim(),
         color: selectedColor,
         assignedShopIds,
+        permissions: sellerPermissions,
       },
       currentUser
     );
@@ -251,7 +257,7 @@ export const AdminSellers: React.FC = () => {
       addToast({
         type: 'success',
         title: 'Seller Updated',
-        description: `Profile and shop assignments for '${name}' updated.`,
+        description: `Profile, shop assignments, and permissions for '${name}' updated.`,
       });
       setIsEditModalOpen(false);
     } else {
@@ -355,16 +361,13 @@ export const AdminSellers: React.FC = () => {
         {sellers.map(seller => {
           const colorObj = getSellerColorById(seller.color || 'blue');
           const isActive = seller.status === 'ACTIVE';
-
-          // Resolve assigned shop names
           const sellerShops = allShops.filter(sh => (seller.assignedShopIds || []).includes(sh.id));
-
-          // Sales count for this seller
           const sellerSales = dbState.sales.filter(s => s.sellerId === seller.id);
           const totalSalesVolume = sellerSales.reduce(
             (sum, s) => (s.status === 'COMPLETED' ? sum + s.total : sum),
             0
           );
+          const permissionCount = Object.values(seller.permissions || {}).filter(Boolean).length;
 
           return (
             <div
@@ -376,7 +379,6 @@ export const AdminSellers: React.FC = () => {
               <div>
                 <div className="flex items-start justify-between gap-3 mb-3">
                   <div className="flex items-center gap-3">
-                    {/* Avatar with upload button */}
                     <div className="relative group">
                       {seller.avatarUrl ? (
                         <img 
@@ -393,7 +395,6 @@ export const AdminSellers: React.FC = () => {
                         </div>
                       )}
                       
-                      {/* Upload button overlay */}
                       <button
                         onClick={() => handleAvatarClick(seller.id)}
                         disabled={isUploadingAvatar && uploadingSellerId === seller.id}
@@ -466,6 +467,13 @@ export const AdminSellers: React.FC = () => {
                     <span>Lifetime Sales</span>
                     <span className="font-mono text-emerald-400 font-semibold">
                       {formatCurrency(totalSalesVolume, dbState.settings?.currencySymbol || 'TSh')} ({sellerSales.length})
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-slate-400">
+                    <span>Permissions Granted</span>
+                    <span className="font-mono text-blue-400 font-semibold flex items-center gap-1">
+                      <Shield className="w-3 h-3" />
+                      {permissionCount}
                     </span>
                   </div>
                   <div className="flex justify-between text-slate-400">
@@ -647,6 +655,95 @@ export const AdminSellers: React.FC = () => {
                 </div>
               </div>
 
+              {/* Permissions Section */}
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1.5 flex items-center gap-1">
+                  <Shield className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Permissions Granted</span>
+                </label>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto p-2 rounded-lg bg-slate-950 border border-slate-800">
+                  <label className="flex items-center justify-between cursor-pointer p-1.5 rounded hover:bg-slate-900">
+                    <span className="text-xs text-slate-200">Edit Products (Modify existing)</span>
+                    <input
+                      type="checkbox"
+                      checked={sellerPermissions.canEditProducts || false}
+                      onChange={() => togglePermission('canEditProducts')}
+                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
+                    />
+                  </label>
+                  
+                  <label className="flex items-center justify-between cursor-pointer p-1.5 rounded hover:bg-slate-900">
+                    <span className="text-xs text-slate-200">Delete Products</span>
+                    <input
+                      type="checkbox"
+                      checked={sellerPermissions.canDeleteProducts || false}
+                      onChange={() => togglePermission('canDeleteProducts')}
+                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
+                    />
+                  </label>
+                  
+                  <label className="flex items-center justify-between cursor-pointer p-1.5 rounded hover:bg-slate-900">
+                    <span className="text-xs text-slate-200">Manage Inventory (Stock adjustments)</span>
+                    <input
+                      type="checkbox"
+                      checked={sellerPermissions.canManageInventory || false}
+                      onChange={() => togglePermission('canManageInventory')}
+                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
+                    />
+                  </label>
+                  
+                  <label className="flex items-center justify-between cursor-pointer p-1.5 rounded hover:bg-slate-900">
+                    <span className="text-xs text-slate-200">Edit Sales (No approval needed)</span>
+                    <input
+                      type="checkbox"
+                      checked={sellerPermissions.canEditSales || false}
+                      onChange={() => togglePermission('canEditSales')}
+                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
+                    />
+                  </label>
+                  
+                  <label className="flex items-center justify-between cursor-pointer p-1.5 rounded hover:bg-slate-900">
+                    <span className="text-xs text-slate-200">Void Sales</span>
+                    <input
+                      type="checkbox"
+                      checked={sellerPermissions.canDeleteSales || false}
+                      onChange={() => togglePermission('canDeleteSales')}
+                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
+                    />
+                  </label>
+                  
+                  <label className="flex items-center justify-between cursor-pointer p-1.5 rounded hover:bg-slate-900">
+                    <span className="text-xs text-slate-200">Manage All Debts (Not just own)</span>
+                    <input
+                      type="checkbox"
+                      checked={sellerPermissions.canManageDebts || false}
+                      onChange={() => togglePermission('canManageDebts')}
+                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
+                    />
+                  </label>
+                  
+                  <label className="flex items-center justify-between cursor-pointer p-1.5 rounded hover:bg-slate-900">
+                    <span className="text-xs text-slate-200">View Financial Reports</span>
+                    <input
+                      type="checkbox"
+                      checked={sellerPermissions.canViewReports || false}
+                      onChange={() => togglePermission('canViewReports')}
+                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
+                    />
+                  </label>
+                  
+                  <label className="flex items-center justify-between cursor-pointer p-1.5 rounded hover:bg-slate-900">
+                    <span className="text-xs text-slate-200">Record Purchases</span>
+                    <input
+                      type="checkbox"
+                      checked={sellerPermissions.canRecordPurchases || false}
+                      onChange={() => togglePermission('canRecordPurchases')}
+                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
+                    />
+                  </label>
+                </div>
+              </div>
+
               <div>
                 <label className="block text-slate-300 font-medium mb-1.5">Signature Color Theme</label>
                 <div className="grid grid-cols-4 gap-2">
@@ -749,6 +846,95 @@ export const AdminSellers: React.FC = () => {
                       </span>
                     </label>
                   ))}
+                </div>
+              </div>
+
+              {/* Permissions Section */}
+              <div>
+                <label className="block text-slate-300 font-semibold mb-1.5 flex items-center gap-1">
+                  <Shield className="w-3.5 h-3.5 text-blue-400" />
+                  <span>Permissions Granted</span>
+                </label>
+                <div className="space-y-1.5 max-h-48 overflow-y-auto p-2 rounded-lg bg-slate-950 border border-slate-800">
+                  <label className="flex items-center justify-between cursor-pointer p-1.5 rounded hover:bg-slate-900">
+                    <span className="text-xs text-slate-200">Edit Products (Modify existing)</span>
+                    <input
+                      type="checkbox"
+                      checked={sellerPermissions.canEditProducts || false}
+                      onChange={() => togglePermission('canEditProducts')}
+                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
+                    />
+                  </label>
+                  
+                  <label className="flex items-center justify-between cursor-pointer p-1.5 rounded hover:bg-slate-900">
+                    <span className="text-xs text-slate-200">Delete Products</span>
+                    <input
+                      type="checkbox"
+                      checked={sellerPermissions.canDeleteProducts || false}
+                      onChange={() => togglePermission('canDeleteProducts')}
+                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
+                    />
+                  </label>
+                  
+                  <label className="flex items-center justify-between cursor-pointer p-1.5 rounded hover:bg-slate-900">
+                    <span className="text-xs text-slate-200">Manage Inventory (Stock adjustments)</span>
+                    <input
+                      type="checkbox"
+                      checked={sellerPermissions.canManageInventory || false}
+                      onChange={() => togglePermission('canManageInventory')}
+                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
+                    />
+                  </label>
+                  
+                  <label className="flex items-center justify-between cursor-pointer p-1.5 rounded hover:bg-slate-900">
+                    <span className="text-xs text-slate-200">Edit Sales (No approval needed)</span>
+                    <input
+                      type="checkbox"
+                      checked={sellerPermissions.canEditSales || false}
+                      onChange={() => togglePermission('canEditSales')}
+                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
+                    />
+                  </label>
+                  
+                  <label className="flex items-center justify-between cursor-pointer p-1.5 rounded hover:bg-slate-900">
+                    <span className="text-xs text-slate-200">Void Sales</span>
+                    <input
+                      type="checkbox"
+                      checked={sellerPermissions.canDeleteSales || false}
+                      onChange={() => togglePermission('canDeleteSales')}
+                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
+                    />
+                  </label>
+                  
+                  <label className="flex items-center justify-between cursor-pointer p-1.5 rounded hover:bg-slate-900">
+                    <span className="text-xs text-slate-200">Manage All Debts (Not just own)</span>
+                    <input
+                      type="checkbox"
+                      checked={sellerPermissions.canManageDebts || false}
+                      onChange={() => togglePermission('canManageDebts')}
+                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
+                    />
+                  </label>
+                  
+                  <label className="flex items-center justify-between cursor-pointer p-1.5 rounded hover:bg-slate-900">
+                    <span className="text-xs text-slate-200">View Financial Reports</span>
+                    <input
+                      type="checkbox"
+                      checked={sellerPermissions.canViewReports || false}
+                      onChange={() => togglePermission('canViewReports')}
+                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
+                    />
+                  </label>
+                  
+                  <label className="flex items-center justify-between cursor-pointer p-1.5 rounded hover:bg-slate-900">
+                    <span className="text-xs text-slate-200">Record Purchases</span>
+                    <input
+                      type="checkbox"
+                      checked={sellerPermissions.canRecordPurchases || false}
+                      onChange={() => togglePermission('canRecordPurchases')}
+                      className="rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500"
+                    />
+                  </label>
                 </div>
               </div>
 
