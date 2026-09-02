@@ -120,24 +120,16 @@ export const AdminSales: React.FC = () => {
     setEditReason('');
   };
 
-  // Handle save edit
+  // Handle save edit - Admin only, reason optional
   const handleSaveEdit = () => {
     if (!editingSale || !currentUser) return;
 
-    if (!editReason.trim()) {
-      addToast({
-        type: 'warning',
-        title: 'Reason Required',
-        description: 'Please provide a reason for editing this sale.',
-      });
-      return;
-    }
-
+    // Reason is optional for admin
     setIsEditing(true);
     const result = SalesService.requestSaleEdit(
       editingSale.id,
       editItems,
-      editReason,
+      editReason || 'Admin correction',
       currentUser
     );
     setIsEditing(false);
@@ -386,13 +378,13 @@ export const AdminSales: React.FC = () => {
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-bold text-amber-300 flex items-center gap-2">
               <Clock className="w-4 h-4" />
-              Pending Sale Edit Requests ({pendingRequests.length})
+              Maombi ya Marekebisho Yanayosubiri ({pendingRequests.length})
             </h3>
             <button
               onClick={() => setShowEditRequests(!showEditRequests)}
               className="text-xs text-slate-400 hover:text-white transition"
             >
-              {showEditRequests ? 'Hide' : 'Show'}
+              {showEditRequests ? 'Ficha' : 'Onyesha'}
             </button>
           </div>
 
@@ -401,19 +393,19 @@ export const AdminSales: React.FC = () => {
               <div className="flex justify-between items-start">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">
-                    <span className="font-semibold text-white text-xs">Request from: {request.requestedByName}</span>
+                    <span className="font-semibold text-white text-xs">Ombi kutoka: {request.requestedByName}</span>
                     <span className="text-[10px] text-slate-500">{formatDateTime(request.createdAt)}</span>
                   </div>
                   <p className="text-xs text-slate-400 mb-1">
-                    <strong>Reason:</strong> {request.reason}
+                    <strong>Sababu:</strong> {request.reason}
                   </p>
                   <div className="text-[10px] text-slate-500">
-                    <strong>Original Total:</strong> {formatCurrency(request.originalValues.total, settings.currencySymbol)} →{' '}
-                    <strong>New Total:</strong> {formatCurrency(request.newValues.total, settings.currencySymbol)}
+                    <strong>Jumla ya Awali:</strong> {formatCurrency(request.originalValues.total, settings.currencySymbol)} →{' '}
+                    <strong>Jumla Mpya:</strong> {formatCurrency(request.newValues.total, settings.currencySymbol)}
                   </div>
                   <div className="text-[10px] text-slate-500 mt-1">
-                    <strong>Items Changed:</strong>{' '}
-                    {request.originalValues.items.length} → {request.newValues.items.length} items
+                    <strong>Vitu Vilivyobadilishwa:</strong>{' '}
+                    {request.originalValues.items.length} → {request.newValues.items.length} vitu
                   </div>
                 </div>
                 <div className="flex gap-2 ml-4">
@@ -422,14 +414,14 @@ export const AdminSales: React.FC = () => {
                     className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition"
                   >
                     <Check className="w-3 h-3 inline mr-1" />
-                    Approve
+                    Kubali
                   </button>
                   <button
                     onClick={() => handleReviewRequest(request, 'REJECT')}
                     className="px-3 py-1.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition"
                   >
                     <X className="w-3 h-3 inline mr-1" />
-                    Reject
+                    Kataa
                   </button>
                 </div>
               </div>
@@ -447,7 +439,7 @@ export const AdminSales: React.FC = () => {
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder="Search receipt #, seller name, or product item..."
+              placeholder="Tafuta risiti, muuzaji, au bidhaa..."
               className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
@@ -457,7 +449,7 @@ export const AdminSales: React.FC = () => {
             onChange={e => setShopFilter(e.target.value)}
             className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
-            <option value="ALL">🏪 All Shops</option>
+            <option value="ALL">🏪 Maduka Yote</option>
             {shops.map(s => (
               <option key={s.id} value={s.id}>🏪 {s.name}</option>
             ))}
@@ -468,7 +460,7 @@ export const AdminSales: React.FC = () => {
             onChange={e => setSellerFilter(e.target.value)}
             className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
-            <option value="ALL">All Sellers / Cashiers</option>
+            <option value="ALL">Wauzaji Wote</option>
             {sellers.map(s => (
               <option key={s.id} value={s.id}>{s.name} (@{s.username})</option>
             ))}
@@ -479,7 +471,7 @@ export const AdminSales: React.FC = () => {
             onChange={e => setPaymentFilter(e.target.value)}
             className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
-            <option value="ALL">All Payment Methods</option>
+            <option value="ALL">Njia Zote za Malipo</option>
             <option value="CASH">Cash</option>
             <option value="CARD">Card</option>
             <option value="MOBILE_MONEY">Mobile Money</option>
@@ -492,23 +484,23 @@ export const AdminSales: React.FC = () => {
             onChange={e => setStatusFilter(e.target.value)}
             className="bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
           >
-            <option value="ALL">All Statuses</option>
-            <option value="COMPLETED">Completed</option>
-            <option value="VOIDED">Voided / Cancelled</option>
+            <option value="ALL">Hali Zote</option>
+            <option value="COMPLETED">Imekamilika</option>
+            <option value="VOIDED">Imefutwa</option>
           </select>
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800/80">
           <div className="flex items-center gap-2">
             <Calendar className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-slate-400">Date Range:</span>
+            <span className="text-slate-400">Tarehe:</span>
             <input
               type="date"
               value={startDate}
               onChange={e => setStartDate(e.target.value)}
               className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white"
             />
-            <span className="text-slate-500">to</span>
+            <span className="text-slate-500">mpaka</span>
             <input
               type="date"
               value={endDate}
@@ -530,7 +522,7 @@ export const AdminSales: React.FC = () => {
               }}
               className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition"
             >
-              Reset Filters
+              Futa Vichujio
             </button>
           )}
         </div>
@@ -542,16 +534,16 @@ export const AdminSales: React.FC = () => {
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-slate-800 bg-slate-950/60 text-slate-400">
-                <th className="py-3 px-4 font-semibold">Receipt Number</th>
-                <th className="py-3 px-4 font-semibold">Date & Time</th>
-                <th className="py-3 px-4 font-semibold">Shop</th>
-                <th className="py-3 px-4 font-semibold">Seller</th>
-                <th className="py-3 px-4 font-semibold">Products Sold</th>
-                <th className="py-3 px-4 font-semibold">Payment</th>
-                <th className="py-3 px-4 text-right font-semibold">Total Revenue</th>
-                <th className="py-3 px-4 text-right font-semibold">Profit</th>
-                <th className="py-3 px-4 text-center font-semibold">Status</th>
-                <th className="py-3 px-4 text-right font-semibold">Actions</th>
+                <th className="py-3 px-4 font-semibold">Namba ya Risiti</th>
+                <th className="py-3 px-4 font-semibold">Tarehe & Muda</th>
+                <th className="py-3 px-4 font-semibold">Duka</th>
+                <th className="py-3 px-4 font-semibold">Muuzaji</th>
+                <th className="py-3 px-4 font-semibold">Bidhaa Zilizouzwa</th>
+                <th className="py-3 px-4 font-semibold">Malipo</th>
+                <th className="py-3 px-4 text-right font-semibold">Jumla</th>
+                <th className="py-3 px-4 text-right font-semibold">Faida</th>
+                <th className="py-3 px-4 text-center font-semibold">Hali</th>
+                <th className="py-3 px-4 text-right font-semibold">Vitendo</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
@@ -559,7 +551,7 @@ export const AdminSales: React.FC = () => {
                 <tr>
                   <td colSpan={10} className="py-10 text-center text-slate-500">
                     <Receipt className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                    <p>No transaction records found matching the filter criteria.</p>
+                    <p>Hakuna mauzo yaliyopatikana.</p>
                   </td>
                 </tr>
               ) : (
@@ -616,7 +608,7 @@ export const AdminSales: React.FC = () => {
                           onClick={() => showReceipt(sale)}
                           className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium transition"
                         >
-                          Receipt
+                          Risiti
                         </button>
                         {!isVoided && (
                           <>
@@ -625,7 +617,7 @@ export const AdminSales: React.FC = () => {
                               className="px-2 py-1 rounded bg-blue-500/15 hover:bg-blue-600 hover:text-white text-blue-300 text-[11px] font-semibold border border-blue-500/30 transition"
                             >
                               <Pencil className="w-3 h-3 inline mr-0.5" />
-                              Edit
+                              Hariri
                             </button>
                             <button
                               onClick={() => {
@@ -634,7 +626,7 @@ export const AdminSales: React.FC = () => {
                               }}
                               className="px-2 py-1 rounded bg-rose-500/15 hover:bg-rose-600 hover:text-white text-rose-300 text-[11px] font-semibold border border-rose-500/30 transition"
                             >
-                              Void
+                              Futa
                             </button>
                           </>
                         )}
@@ -655,7 +647,7 @@ export const AdminSales: React.FC = () => {
             <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
               <div className="flex items-center gap-2 text-blue-400">
                 <Pencil className="w-5 h-5" />
-                <h3 className="text-base font-bold text-white">Edit Sale {editingSale.receiptNumber}</h3>
+                <h3 className="text-base font-bold text-white">Hariri Mauzo {editingSale.receiptNumber}</h3>
               </div>
               <button onClick={() => setEditingSale(null)} className="text-slate-400 hover:text-white p-1">
                 <X className="w-5 h-5" />
@@ -663,17 +655,17 @@ export const AdminSales: React.FC = () => {
             </div>
 
             <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-200 text-xs mb-4">
-              <strong>Stock Recalculation:</strong> Editing this sale will reverse old quantities and apply new ones automatically.
+              <strong>Hesabu ya Hisa:</strong> Kuhariri mauzo haya kutarudisha kiasi cha awali na kutumia kipya kiotomatiki.
             </div>
 
             <div className="space-y-3 mb-4">
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Edit Reason *</label>
+                <label className="block text-slate-300 font-medium mb-1">Sababu ya Marekebisho (Hiari)</label>
                 <input
                   type="text"
                   value={editReason}
                   onChange={e => setEditReason(e.target.value)}
-                  placeholder="e.g. Wrong quantity entered"
+                  placeholder="Hiari - Mfano: Kiasi kimewekwa vibaya"
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
                 />
               </div>
@@ -684,48 +676,60 @@ export const AdminSales: React.FC = () => {
                   return (
                     <div key={idx} className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-2">
                       <div className="flex-1">
-                        <span className="text-white text-xs font-semibold">{product?.name || 'Unknown'}</span>
+                        <span className="text-white text-xs font-semibold">{product?.name || 'Haijulikani'}</span>
                         <span className="text-slate-500 text-[10px] block">{product?.sku || ''}</span>
                       </div>
                       <div className="w-20">
-                        <label className="text-[10px] text-slate-400 block">Qty</label>
+                        <label className="text-[10px] text-slate-400 block">Idadi</label>
                         <input
                           type="number"
-                          min="1"
+                          min="0"
                           value={item.quantity}
                           onChange={e => {
+                            const val = e.target.value;
                             const newItems = [...editItems];
-                            newItems[idx] = { ...newItems[idx], quantity: parseInt(e.target.value) || 0 };
+                            newItems[idx] = { 
+                              ...newItems[idx], 
+                              quantity: val === '' ? '' as any : parseInt(val) || 0 
+                            };
                             setEditItems(newItems);
                           }}
                           className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono text-center text-xs"
                         />
                       </div>
                       <div className="w-24">
-                        <label className="text-[10px] text-slate-400 block">Unit Price</label>
+                        <label className="text-[10px] text-slate-400 block">Bei</label>
                         <input
                           type="number"
                           min="0"
                           step="0.01"
                           value={item.unitPrice}
                           onChange={e => {
+                            const val = e.target.value;
                             const newItems = [...editItems];
-                            newItems[idx] = { ...newItems[idx], unitPrice: parseFloat(e.target.value) || 0 };
+                            newItems[idx] = { 
+                              ...newItems[idx], 
+                              unitPrice: val === '' ? '' as any : parseFloat(val) || 0 
+                            };
                             setEditItems(newItems);
                           }}
                           className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono text-xs"
                         />
                       </div>
                       <div className="w-20">
-                        <label className="text-[10px] text-slate-400 block">Discount</label>
+                        <label className="text-[10px] text-slate-400 block">Punguzo</label>
                         <input
                           type="number"
                           min="0"
                           step="0.01"
                           value={item.discount || 0}
                           onChange={e => {
+                            const val = e.target.value;
                             const newItems = [...editItems];
-                            newItems[idx] = { ...newItems[idx], discount: parseFloat(e.target.value) || 0 };
+                            newItems[idx] = { 
+                              ...newItems[idx], 
+                              discount: val === '' ? '' as any : parseFloat(val) || 0 
+                            };
                             setEditItems(newItems);
                           }}
                           className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono text-xs"
@@ -742,14 +746,14 @@ export const AdminSales: React.FC = () => {
                 onClick={() => setEditingSale(null)}
                 className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs"
               >
-                Cancel
+                Ghairi
               </button>
               <button
                 onClick={handleSaveEdit}
                 disabled={isEditing}
                 className="px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold"
               >
-                {isEditing ? 'Saving...' : 'Save Edit & Recalculate Stock'}
+                {isEditing ? 'Inahifadhi...' : 'Hifadhi Marekebisho'}
               </button>
             </div>
           </div>
@@ -763,7 +767,7 @@ export const AdminSales: React.FC = () => {
             <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
               <div className="flex items-center gap-2 text-rose-400">
                 <Ban className="w-5 h-5" />
-                <h3 className="text-base font-bold text-white">Void Sale {voidingSale.receiptNumber}</h3>
+                <h3 className="text-base font-bold text-white">Futa Mauzo {voidingSale.receiptNumber}</h3>
               </div>
               <button onClick={() => setVoidingSale(null)} className="text-slate-400 hover:text-white p-1">
                 <X className="w-5 h-5" />
@@ -773,27 +777,27 @@ export const AdminSales: React.FC = () => {
             <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-200 text-xs mb-4 flex items-start gap-2">
               <RotateCcw className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
               <div>
-                <strong>Automatic Stock Restoration:</strong> Voiding this transaction will preserve the historical record and automatically restock all{' '}
-                <strong>{voidingSale.items.reduce((s, i) => s + i.quantity, 0)} units</strong> back into inventory.
+                <strong>Kurejesha Hisa Kiotomatiki:</strong> Kufuta muamala huu kutarejesha{' '}
+                <strong>{voidingSale.items.reduce((s, i) => s + i.quantity, 0)} vitu</strong> kwenye hisa.
               </div>
             </div>
 
             <div className="space-y-3 text-xs mb-5">
-              <label className="block text-slate-300 font-semibold mb-1">Cancellation Reason *</label>
+              <label className="block text-slate-300 font-semibold mb-1">Sababu ya Kufuta *</label>
               <textarea
                 required
                 rows={3}
                 value={voidReason}
                 onChange={e => setVoidReason(e.target.value)}
-                placeholder="e.g. Customer returned items..."
+                placeholder="Mfano: Mteja amerudisha bidhaa..."
                 className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-white"
               />
             </div>
 
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
-              <button onClick={() => setVoidingSale(null)} className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs">Cancel</button>
+              <button onClick={() => setVoidingSale(null)} className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs">Ghairi</button>
               <button onClick={handleExecuteVoid} disabled={isVoiding} className="px-4 py-2 rounded-lg bg-rose-600 text-white text-xs font-bold">
-                {isVoiding ? 'Processing...' : 'Confirm Void & Restock'}
+                {isVoiding ? 'Inachakata...' : 'Thibitisha Kufuta & Kurejesha Hisa'}
               </button>
             </div>
           </div>
