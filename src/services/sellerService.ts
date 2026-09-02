@@ -75,7 +75,6 @@ export class SellerService {
 
     db.saveUsers([...users, newSeller]);
 
-    // Sync payload includes passwordHash and avatarUrl for cloud
     db.enqueueSync({
       id: generateUUID(),
       operation: 'CREATE_SELLER',
@@ -114,7 +113,6 @@ export class SellerService {
 
   /**
    * Admin updates a seller (name, color, status, assignedShopIds, optional new password).
-   * Note: Permanent deletion is forbidden.
    */
   public static updateSeller(
     sellerId: string,
@@ -158,7 +156,6 @@ export class SellerService {
     users[index] = seller;
     db.saveUsers(users);
 
-    // Sync payload includes passwordHash and avatarUrl to preserve them
     db.enqueueSync({
       id: generateUUID(),
       operation: 'UPDATE_SELLER',
@@ -204,6 +201,54 @@ export class SellerService {
   }
 
   /**
+   * Admin deletes a seller permanently.
+   */
+  public static deleteSeller(
+    sellerId: string,
+    currentUser: User
+  ): { success: boolean; error?: string } {
+    if (currentUser.role !== 'ADMIN') {
+      return { success: false, error: 'Permission Denied: Only Admin can delete sellers.' };
+    }
+
+    const users = db.getUsers();
+    const seller = users.find(u => u.id === sellerId && u.role === 'SELLER');
+    
+    if (!seller) {
+      return { success: false, error: 'Seller not found.' };
+    }
+
+    // Remove seller from users
+    const updatedUsers = users.filter(u => u.id !== sellerId);
+    db.saveUsers(updatedUsers);
+
+    // Sync to cloud
+    db.enqueueSync({
+      id: generateUUID(),
+      operation: 'DELETE_SELLER',
+      entityType: 'SELLER',
+      entityId: sellerId,
+      payload: { id: sellerId },
+      status: 'PENDING',
+      createdAt: new Date().toISOString(),
+    });
+
+    // Audit log
+    db.addAuditLog({
+      id: generateUUID(),
+      userId: currentUser.id,
+      userName: currentUser.name,
+      action: 'DELETE_SELLER',
+      details: `Deleted seller account: ${seller.name} (@${seller.username})`,
+      entityType: 'SELLER',
+      entityId: sellerId,
+      timestamp: new Date().toISOString(),
+    });
+
+    return { success: true };
+  }
+
+  /**
    * Seller or Admin updates the seller's account color.
    */
   public static updateSellerColor(
@@ -223,7 +268,6 @@ export class SellerService {
     user.updatedAt = new Date().toISOString();
     db.saveUsers(users);
 
-    // Sync color update to cloud (includes avatarUrl to preserve it)
     db.enqueueSync({
       id: generateUUID(),
       operation: 'UPDATE_SELLER',
