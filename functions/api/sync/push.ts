@@ -769,9 +769,9 @@ async function upsertUser(db: any, user: any) {
   await db.prepare(`
     INSERT INTO users (
       id, username, name, role, password_hash, color, status,
-      assigned_shop_ids, avatar_url, created_at, updated_at
+      assigned_shop_ids, avatar_url, permissions, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       username = excluded.username,
       name = excluded.name,
@@ -781,6 +781,7 @@ async function upsertUser(db: any, user: any) {
       status = excluded.status,
       assigned_shop_ids = excluded.assigned_shop_ids,
       avatar_url = excluded.avatar_url,
+      permissions = excluded.permissions,
       updated_at = excluded.updated_at
   `).bind(
     user.id, 
@@ -792,6 +793,7 @@ async function upsertUser(db: any, user: any) {
     user.status || 'ACTIVE',
     JSON.stringify(user.assignedShopIds || []),
     user.avatarUrl || user.avatar_url || null,
+    JSON.stringify(user.permissions || {}),
     user.createdAt || new Date().toISOString(), 
     user.updatedAt || new Date().toISOString()
   ).run();
