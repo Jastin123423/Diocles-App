@@ -15,6 +15,7 @@ import {
   Layers,
   FolderTree,
   Check,
+  Trash2,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ProductService } from '../../services/productService';
@@ -40,6 +41,7 @@ export const AdminProducts: React.FC = () => {
   // Add / Edit Product Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [deletingProduct, setDeletingProduct] = useState<Product | null>(null);
 
   // Product Form Fields
   const [productShopId, setProductShopId] = useState('');
@@ -235,6 +237,28 @@ export const AdminProducts: React.FC = () => {
         description: `'${p.name}' is now ${newStatus}. Preserved in history.`,
       });
     }
+  };
+
+  const handleDeleteProduct = () => {
+    if (!deletingProduct || !currentUser) return;
+
+    const res = ProductService.deleteProduct(deletingProduct.id, currentUser);
+
+    if (res.success) {
+      addToast({
+        type: 'success',
+        title: 'Product Deleted',
+        description: `'${deletingProduct.name}' has been permanently deleted.`,
+      });
+      setRefreshKey(prev => prev + 1);
+    } else {
+      addToast({
+        type: 'error',
+        title: 'Delete Failed',
+        description: res.error || 'Could not delete product.',
+      });
+    }
+    setDeletingProduct(null);
   };
 
   // Category Actions
@@ -563,6 +587,13 @@ export const AdminProducts: React.FC = () => {
                             >
                               <Power className="w-3.5 h-3.5" />
                             </button>
+                            <button
+                              onClick={() => setDeletingProduct(product)}
+                              className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition"
+                              title="Delete product"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </td>
                         </tr>
                       );
@@ -640,6 +671,48 @@ export const AdminProducts: React.FC = () => {
                 );
               })
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Delete Product Confirmation Modal */}
+      {deletingProduct && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
+              <div className="flex items-center gap-2 text-rose-400">
+                <Trash2 className="w-5 h-5" />
+                <h3 className="text-base font-bold text-white">Delete Product?</h3>
+              </div>
+              <button onClick={() => setDeletingProduct(null)} className="text-slate-400 hover:text-white p-1">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-200 text-xs mb-4">
+              <strong>Warning:</strong> This action is permanent and cannot be undone.
+            </div>
+
+            <p className="text-xs text-slate-400 mb-4">
+              Are you sure you want to delete <strong className="text-white">{deletingProduct.name}</strong>?
+              <br /><br />
+              This will permanently remove the product from all shops and delete its images.
+            </p>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+              <button
+                onClick={() => setDeletingProduct(null)}
+                className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteProduct}
+                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition"
+              >
+                Delete Product
+              </button>
+            </div>
           </div>
         </div>
       )}
