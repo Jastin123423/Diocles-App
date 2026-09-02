@@ -122,8 +122,8 @@ export const AdminProducts: React.FC = () => {
     setSku(p.sku);
     setBarcode(p.barcode);
     setCategoryId(p.categoryId);
-    setPurchasePrice(formatNumberWithCommas(p.purchasePrice)); // Format for display
-    setSellingPrice(formatNumberWithCommas(p.sellingPrice));
+    setPurchasePrice(p.purchasePrice.toString());
+    setSellingPrice(p.sellingPrice.toString());
     setCurrentStock(p.currentStock.toString());
     setMinStock(p.minStock.toString());
     setUnit(p.unit);
@@ -157,9 +157,9 @@ export const AdminProducts: React.FC = () => {
       return;
     }
 
-    // Parse formatted price strings back to numbers
-    const sPrice = parsePriceInput(sellingPrice);
-    const pPrice = parsePriceInput(purchasePrice) || 0;
+    // Parse price values
+    const sPrice = parseFloat(sellingPrice) || 0;
+    const pPrice = parseFloat(purchasePrice) || 0;
 
     if (isNaN(sPrice) || sPrice < 0) {
       setFormError('Please enter a valid selling price.');
@@ -214,7 +214,7 @@ export const AdminProducts: React.FC = () => {
           description: editingProduct ? `'${name}' details updated.` : `'${name}' added to inventory catalog.`,
         });
         setIsModalOpen(false);
-        setRefreshKey(prev => prev + 1); // Force re-render
+        setRefreshKey(prev => prev + 1);
       } else {
         setFormError(result.error || 'Failed to save product.');
       }
@@ -741,6 +741,7 @@ export const AdminProducts: React.FC = () => {
             )}
 
             <form onSubmit={handleSaveProduct} className="space-y-4 text-xs">
+              {/* 1. Assigned Shop */}
               <div>
                 <label className="block text-slate-300 font-medium mb-1">Assigned Shop / Unit *</label>
                 <select
@@ -758,6 +759,7 @@ export const AdminProducts: React.FC = () => {
                 )}
               </div>
 
+              {/* 2. Product Title */}
               <div>
                 <label className="block text-slate-300 font-medium mb-1">Product Title *</label>
                 <input
@@ -770,9 +772,79 @@ export const AdminProducts: React.FC = () => {
                 />
               </div>
 
+              {/* 3. Purchasing Price & Selling Price - MOVED UP */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Category *</label>
+                  <label className="block text-slate-300 font-medium mb-1">Purchasing Price</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={purchasePrice}
+                    onChange={e => setPurchasePrice(e.target.value)}
+                    placeholder="0"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Selling Price *</label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    required
+                    value={sellingPrice}
+                    onChange={e => setSellingPrice(e.target.value)}
+                    placeholder="0"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* 4. Initial Stock & Min Threshold - MOVED UP */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">
+                    {editingProduct ? 'Current Stock Level' : 'Initial Stock'}
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={currentStock}
+                    onChange={e => setCurrentStock(e.target.value)}
+                    placeholder="0"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-slate-300 font-medium mb-1">Min Threshold</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={minStock}
+                    onChange={e => setMinStock(e.target.value)}
+                    placeholder="5"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* 5. Category & Unit - MOVED DOWN */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-slate-300 font-medium">Category *</label>
+                    <button
+                      type="button"
+                      onClick={() => openAddCategoryModal(productShopId)}
+                      className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-0.5"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>New</span>
+                    </button>
+                  </div>
                   <select
                     value={categoryId}
                     onChange={e => setCategoryId(e.target.value)}
@@ -780,11 +852,18 @@ export const AdminProducts: React.FC = () => {
                   >
                     <option value="">Select category...</option>
                     {categories
-                      .filter(c => c.shopId === productShopId || !productShopId)
+                      .filter(c => c.shopId === productShopId && (c.status !== 'INACTIVE' || c.id === categoryId))
                       .map(c => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
+                        <option key={c.id} value={c.id}>
+                          {c.name} {c.status === 'INACTIVE' ? '(Inactive)' : ''}
+                        </option>
                       ))}
                   </select>
+                  {categories.filter(c => c.shopId === productShopId).length === 0 && (
+                    <p className="text-[10px] text-amber-400 mt-1">
+                      No categories exist for this shop yet. Click "+ New" above.
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -795,7 +874,7 @@ export const AdminProducts: React.FC = () => {
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
                     <option value="pcs">Pieces (pcs)</option>
-                    <option value="meter">Meter (m)</option>
+                    <option value="meter">Meter / Meters (m)</option>
                     <option value="pack">Pack</option>
                     <option value="box">Box</option>
                     <option value="kg">Kilogram (kg)</option>
@@ -807,6 +886,7 @@ export const AdminProducts: React.FC = () => {
                 </div>
               </div>
 
+              {/* 6. SKU & Barcode - MOVED DOWN */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">SKU / Code</label>
@@ -815,9 +895,10 @@ export const AdminProducts: React.FC = () => {
                     value={sku}
                     onChange={e => setSku(e.target.value)}
                     placeholder="Auto-generated if empty"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
                 </div>
+
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Barcode</label>
                   <input
@@ -825,59 +906,12 @@ export const AdminProducts: React.FC = () => {
                     value={barcode}
                     onChange={e => setBarcode(e.target.value)}
                     placeholder="Scan or enter code"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono"
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">Purchase Price</label>
-                  <input
-                    type="text"
-                    value={purchasePrice}
-                    onChange={e => setPurchasePrice(formatPriceInput(e.target.value))}
-                    placeholder="0"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">Selling Price *</label>
-                  <input
-                    type="text"
-                    required
-                    value={sellingPrice}
-                    onChange={e => setSellingPrice(formatPriceInput(e.target.value))}
-                    placeholder="0"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">Initial Stock</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={currentStock}
-                    onChange={e => setCurrentStock(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">Min Threshold</label>
-                  <input
-                    type="number"
-                    min="0"
-                    value={minStock}
-                    onChange={e => setMinStock(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono"
-                  />
-                </div>
-              </div>
-
-              {/* Product Images */}
+              {/* 7. Product Images */}
               <div className="pt-2 border-t border-slate-800/80">
                 <ProductImageUpload
                   images={productImages}
@@ -886,6 +920,7 @@ export const AdminProducts: React.FC = () => {
                 />
               </div>
 
+              {/* 8. Buttons */}
               <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
                 <button
                   type="button"
