@@ -1,5 +1,5 @@
 import { db } from '../db/storage';
-import { Sale, SaleItem, PaymentMethod, User } from '../types';
+import { Sale, SaleItem, PaymentMethod, User, SaleEditRequest } from '../types';
 import { generateUUID } from '../utils/crypto';
 import { generateReceiptNumber } from '../utils/formatters';
 import { NotificationService } from './notificationService';
@@ -306,6 +306,305 @@ export class SalesService {
     });
 
     return { success: true };
+  }
+
+  /**
+   * Seller or Admin requests a sale edit
+   */
+  public static requestSaleEdit(
+    saleId: string,
+    newItems: CartItemInput[],
+    reason: string,
+    currentUser: User
+  ): { success: boolean; error?: string; requiresApproval?: boolean } {
+    const sales = db.getSales();
+    const sale = sales.find(s => s.id === saleId);
+    
+    if (!sale) {
+      return { success: false, error: 'Sale not found.' };
+    }
+
+    if (sale.status === 'VOIDED') {
+      return { success: false, error: 'Cannot edit a voided sale.' };
+    }
+
+    // Validate new items
+    if (!newItems || newItems.length === 0) {
+      return { success: false, error: 'Please provide at least one item.' };
+    }
+
+    // Calculate new values
+    const products = db.getProducts();
+    let newSubtotal = 0;
+    let newCostOfGoods = 0;
+    
+    const newSaleItems: SaleItem[] = newItems.map(itemInput => {
+      const product = products.find(p => p.id === itemInput.productId);
+      if (!product) {
+        throw new Error(`Product not found: ${itemInput.productId}`);
+      }
+      
+      const itemTotal = itemInput.quantity * itemInput.unitPrice - (itemInput.discount || 0);
+      newSubtotal += itemTotal;
+      newCostOfGoods += itemInput.quantity * product.purchasePrice;
+      
+      return {
+        id: generateUUID(),
+        saleId: sale.id,
+        shopId: sale.shopId,
+        productId: product.id,
+        productName: product.name,
+        sku: product.sku,
+        unitPrice: itemInput.unitPrice,
+        purchasePrice: product.purchasePrice,
+        quantity: itemInput.quantity,
+        discount: itemInput.discount || 0,
+        total: Math.max(0, itemTotal),
+      };
+    });
+
+    const newTotal = Number((newSubtotal - sale.discount).toFixed(2));
+    const newGrossProfit = Number((newTotal - newCostOfGoods).toFixed(2));
+
+    // If admin, apply directly. If seller, create request for approval.
+    if (currentUser.role === 'ADMIN') {
+      // Apply directly
+      return this.applySaleEdit(sale, {
+        items: newSaleItems,
+        subtotal: Number(newSubtotal.toFixed(2)),
+        total: newTotal,
+        costOfGoods: Number(newCostOfGoods.toFixed(2)),
+        grossProfit: newGrossProfit,
+        amountReceived: newTotal,
+        change: 0,
+      }, currentUser, reason);
+    }
+
+    // Seller needs approval
+    const editRequest: SaleEditRequest = {
+      id: generateUUID(),
+      saleId: sale.id,
+      requestedByUserId: currentUser.id,
+      requestedByName: currentUser.name,
+      originalValues: {
+        items: sale.items,
+        total: sale.total,
+        subtotal: sale.subtotal,
+        grossProfit: sale.grossProfit,
+        costOfGoods: sale.costOfGoods,
+        amountReceived: sale.amountReceived,
+        change: sale.change,
+      },
+      newValues: {
+        items: newSaleItems,
+        total: newTotal,
+        subtotal: Number(newSubtotal.toFixed(2)),
+        grossProfit: newGrossProfit,
+        costOfGoods: Number(newCostOfGoods.toFixed(2)),
+        amountReceived: newTotal,
+        change: 0,
+      },
+      reason,
+      status: 'PENDING',
+      createdAt: new Date().toISOString(),
+    };
+
+    // Save edit request
+    const editRequests = db.getSaleEditRequests?.() || [];
+    db.saveSaleEditRequests?.([editRequest, ...editRequests]);
+
+    // Sync to cloud
+    db.enqueueSync({
+      id: generateUUID(),
+      operation: 'CREATE_SALE_EDIT_REQUEST',
+      entityType: 'SALE_EDIT_REQUEST',
+      entityId: editRequest.id,
+      payload: editRequest,
+      status: 'PENDING',
+      createdAt: new Date().toISOString(),
+    });
+
+    // Notify admins
+    const admins = db.getUsers().filter(u => u.role === 'ADMIN');
+    for (const admin of admins) {
+      NotificationService.notifySaleEditRequested(editRequest, admin.id);
+    }
+
+    return { success: true, requiresApproval: true };
+  }
+
+  /**
+   * Apply sale edit (used by admin)
+   */
+  private static applySaleEdit(
+    sale: Sale,
+    newValues: {
+      items: SaleItem[];
+      subtotal: number;
+      total: number;
+      costOfGoods: number;
+      grossProfit: number;
+      amountReceived: number;
+      change: number;
+    },
+    currentUser: User,
+    reason?: string
+  ): { success: boolean; error?: string } {
+    const products = db.getProducts();
+    const sales = db.getSales();
+
+    // 1. Reverse old stock (add back old quantities)
+    const updatedProducts = [...products];
+    for (const oldItem of sale.items) {
+      const prodIndex = updatedProducts.findIndex(p => p.id === oldItem.productId);
+      if (prodIndex !== -1) {
+        updatedProducts[prodIndex] = {
+          ...updatedProducts[prodIndex],
+          currentStock: updatedProducts[prodIndex].currentStock + oldItem.quantity,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+    }
+
+    // 2. Apply new stock (subtract new quantities)
+    for (const newItem of newValues.items) {
+      const prodIndex = updatedProducts.findIndex(p => p.id === newItem.productId);
+      if (prodIndex !== -1) {
+        updatedProducts[prodIndex] = {
+          ...updatedProducts[prodIndex],
+          currentStock: updatedProducts[prodIndex].currentStock - newItem.quantity,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+    }
+
+    db.saveProducts(updatedProducts);
+
+    // 3. Update sale
+    const saleIndex = sales.findIndex(s => s.id === sale.id);
+    if (saleIndex !== -1) {
+      const editNote = `\n[Edited by ${currentUser.name} at ${new Date().toISOString()}${reason ? ` - Reason: ${reason}` : ''}]`;
+      sales[saleIndex] = {
+        ...sale,
+        items: newValues.items,
+        subtotal: newValues.subtotal,
+        total: newValues.total,
+        costOfGoods: newValues.costOfGoods,
+        grossProfit: newValues.grossProfit,
+        amountReceived: newValues.amountReceived,
+        change: newValues.change,
+        notes: (sale.notes || '') + editNote,
+      };
+      db.saveSales(sales);
+
+      // Sync to cloud
+      db.enqueueSync({
+        id: generateUUID(),
+        operation: 'UPDATE_SALE',
+        entityType: 'SALE',
+        entityId: sale.id,
+        payload: sales[saleIndex],
+        status: 'PENDING',
+        createdAt: new Date().toISOString(),
+      });
+
+      // Audit log
+      db.addAuditLog({
+        id: generateUUID(),
+        userId: currentUser.id,
+        userName: currentUser.name,
+        action: 'EDIT_SALE',
+        details: `Edited sale ${sale.receiptNumber}${reason ? ` - Reason: ${reason}` : ''}`,
+        entityType: 'SALE',
+        entityId: sale.id,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    return { success: true };
+  }
+
+  /**
+   * Approve or reject a sale edit request (admin only)
+   */
+  public static reviewSaleEdit(
+    requestId: string,
+    action: 'APPROVE' | 'REJECT',
+    currentUser: User,
+    reviewNote?: string
+  ): { success: boolean; error?: string } {
+    if (currentUser.role !== 'ADMIN') {
+      return { success: false, error: 'Only admin can review sale edits.' };
+    }
+
+    const requests = db.getSaleEditRequests?.() || [];
+    const request = requests.find(r => r.id === requestId);
+
+    if (!request) {
+      return { success: false, error: 'Edit request not found.' };
+    }
+
+    if (request.status !== 'PENDING') {
+      return { success: false, error: 'Request already reviewed.' };
+    }
+
+    if (action === 'APPROVE') {
+      const sales = db.getSales();
+      const sale = sales.find(s => s.id === request.saleId);
+      if (!sale) {
+        return { success: false, error: 'Sale not found.' };
+      }
+
+      const result = this.applySaleEdit(sale, request.newValues, currentUser, request.reason);
+      if (!result.success) {
+        return result;
+      }
+    }
+
+    // Update request status
+    const updatedRequests = requests.map(r =>
+      r.id === requestId
+        ? {
+            ...r,
+            status: action === 'APPROVE' ? 'APPROVED' as const : 'REJECTED' as const,
+            reviewedByUserId: currentUser.id,
+            reviewedByName: currentUser.name,
+            reviewNote,
+            reviewedAt: new Date().toISOString(),
+          }
+        : r
+    );
+    db.saveSaleEditRequests?.(updatedRequests);
+
+    // Sync to cloud
+    db.enqueueSync({
+      id: generateUUID(),
+      operation: 'REVIEW_SALE_EDIT_REQUEST',
+      entityType: 'SALE_EDIT_REQUEST',
+      entityId: requestId,
+      payload: updatedRequests.find(r => r.id === requestId),
+      status: 'PENDING',
+      createdAt: new Date().toISOString(),
+    });
+
+    // Notify seller
+    NotificationService.notifySaleEditReviewed(request, action, currentUser.name, reviewNote);
+
+    return { success: true };
+  }
+
+  /**
+   * Get sale edit requests
+   */
+  public static getSaleEditRequests(currentUser: User): SaleEditRequest[] {
+    const requests = db.getSaleEditRequests?.() || [];
+    
+    if (currentUser.role === 'ADMIN') {
+      return requests;
+    }
+    
+    // Sellers only see their own requests
+    return requests.filter(r => r.requestedByUserId === currentUser.id);
   }
 
   /**
