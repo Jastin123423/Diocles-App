@@ -13,10 +13,13 @@ import {
   Printer,
   Download,
   Store,
+  Pencil,
+  Check,
+  Clock,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { SalesService } from '../../services/salesService';
-import { Sale } from '../../types';
+import { SalesService, CartItemInput } from '../../services/salesService';
+import { Sale, SaleEditRequest } from '../../types';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 
 export const AdminSales: React.FC = () => {
@@ -35,11 +38,23 @@ export const AdminSales: React.FC = () => {
   const [voidReason, setVoidReason] = useState('');
   const [isVoiding, setIsVoiding] = useState(false);
 
+  // Edit Sale Dialog
+  const [editingSale, setEditingSale] = useState<Sale | null>(null);
+  const [editItems, setEditItems] = useState<CartItemInput[]>([]);
+  const [editReason, setEditReason] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
+
+  // Show pending edit requests
+  const [showEditRequests, setShowEditRequests] = useState(false);
+
   if (!currentUser || currentUser.role !== 'ADMIN') return null;
 
   const settings = dbState.settings;
   const sellers = dbState.users.filter(u => u.role === 'SELLER');
   const shops = dbState.shops || [];
+  const products = dbState.products || [];
+  const editRequests = SalesService.getSaleEditRequests(currentUser);
+  const pendingRequests = editRequests.filter(r => r.status === 'PENDING');
 
   const sales = SalesService.getSales(
     {
@@ -87,6 +102,84 @@ export const AdminSales: React.FC = () => {
         type: 'error',
         title: 'Void Failed',
         description: res.error || 'Could not void transaction.',
+      });
+    }
+  };
+
+  // Open edit sale modal
+  const openEditSale = (sale: Sale) => {
+    setEditingSale(sale);
+    setEditItems(
+      sale.items.map(item => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        unitPrice: item.unitPrice,
+        discount: item.discount || 0,
+      }))
+    );
+    setEditReason('');
+  };
+
+  // Handle save edit
+  const handleSaveEdit = () => {
+    if (!editingSale || !currentUser) return;
+
+    if (!editReason.trim()) {
+      addToast({
+        type: 'warning',
+        title: 'Reason Required',
+        description: 'Please provide a reason for editing this sale.',
+      });
+      return;
+    }
+
+    setIsEditing(true);
+    const result = SalesService.requestSaleEdit(
+      editingSale.id,
+      editItems,
+      editReason,
+      currentUser
+    );
+    setIsEditing(false);
+
+    if (result.success) {
+      addToast({
+        type: 'success',
+        title: 'Sale Edited Successfully',
+        description: `Receipt #${editingSale.receiptNumber} updated. Stock recalculated.`,
+      });
+      setEditingSale(null);
+      setEditItems([]);
+      setEditReason('');
+    } else {
+      addToast({
+        type: 'error',
+        title: 'Edit Failed',
+        description: result.error || 'Could not edit sale.',
+      });
+    }
+  };
+
+  // Handle review edit request
+  const handleReviewRequest = (request: SaleEditRequest, action: 'APPROVE' | 'REJECT') => {
+    if (!currentUser) return;
+
+    const reviewNote = action === 'REJECT' ? 'Rejected by admin' : undefined;
+    const result = SalesService.reviewSaleEdit(request.id, action, currentUser, reviewNote);
+
+    if (result.success) {
+      addToast({
+        type: 'success',
+        title: action === 'APPROVE' ? 'Edit Approved' : 'Edit Rejected',
+        description: action === 'APPROVE' 
+          ? 'Sale edit approved. Stock recalculated.' 
+          : 'Sale edit request rejected.',
+      });
+    } else {
+      addToast({
+        type: 'error',
+        title: 'Review Failed',
+        description: result.error || 'Could not process review.',
       });
     }
   };
@@ -287,6 +380,64 @@ export const AdminSales: React.FC = () => {
         </div>
       </div>
 
+      {/* Pending Edit Requests Section */}
+      {pendingRequests.length > 0 && (
+        <div className="mb-5 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-sm font-bold text-amber-300 flex items-center gap-2">
+              <Clock className="w-4 h-4" />
+              Pending Sale Edit Requests ({pendingRequests.length})
+            </h3>
+            <button
+              onClick={() => setShowEditRequests(!showEditRequests)}
+              className="text-xs text-slate-400 hover:text-white transition"
+            >
+              {showEditRequests ? 'Hide' : 'Show'}
+            </button>
+          </div>
+
+          {showEditRequests && pendingRequests.map(request => (
+            <div key={request.id} className="p-3 bg-slate-950 rounded-lg border border-slate-800 mb-2">
+              <div className="flex justify-between items-start">
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="font-semibold text-white text-xs">Request from: {request.requestedByName}</span>
+                    <span className="text-[10px] text-slate-500">{formatDateTime(request.createdAt)}</span>
+                  </div>
+                  <p className="text-xs text-slate-400 mb-1">
+                    <strong>Reason:</strong> {request.reason}
+                  </p>
+                  <div className="text-[10px] text-slate-500">
+                    <strong>Original Total:</strong> {formatCurrency(request.originalValues.total, settings.currencySymbol)} →{' '}
+                    <strong>New Total:</strong> {formatCurrency(request.newValues.total, settings.currencySymbol)}
+                  </div>
+                  <div className="text-[10px] text-slate-500 mt-1">
+                    <strong>Items Changed:</strong>{' '}
+                    {request.originalValues.items.length} → {request.newValues.items.length} items
+                  </div>
+                </div>
+                <div className="flex gap-2 ml-4">
+                  <button
+                    onClick={() => handleReviewRequest(request, 'APPROVE')}
+                    className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition"
+                  >
+                    <Check className="w-3 h-3 inline mr-1" />
+                    Approve
+                  </button>
+                  <button
+                    onClick={() => handleReviewRequest(request, 'REJECT')}
+                    className="px-3 py-1.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition"
+                  >
+                    <X className="w-3 h-3 inline mr-1" />
+                    Reject
+                  </button>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Filter Toolbar */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 mb-5 space-y-3 text-xs">
         <div className="flex flex-wrap items-center gap-3">
@@ -468,15 +619,24 @@ export const AdminSales: React.FC = () => {
                           Receipt
                         </button>
                         {!isVoided && (
-                          <button
-                            onClick={() => {
-                              setVoidingSale(sale);
-                              setVoidReason('');
-                            }}
-                            className="px-2 py-1 rounded bg-rose-500/15 hover:bg-rose-600 hover:text-white text-rose-300 text-[11px] font-semibold border border-rose-500/30 transition"
-                          >
-                            Void Sale
-                          </button>
+                          <>
+                            <button
+                              onClick={() => openEditSale(sale)}
+                              className="px-2 py-1 rounded bg-blue-500/15 hover:bg-blue-600 hover:text-white text-blue-300 text-[11px] font-semibold border border-blue-500/30 transition"
+                            >
+                              <Pencil className="w-3 h-3 inline mr-0.5" />
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => {
+                                setVoidingSale(sale);
+                                setVoidReason('');
+                              }}
+                              className="px-2 py-1 rounded bg-rose-500/15 hover:bg-rose-600 hover:text-white text-rose-300 text-[11px] font-semibold border border-rose-500/30 transition"
+                            >
+                              Void
+                            </button>
+                          </>
                         )}
                       </td>
                     </tr>
@@ -487,6 +647,114 @@ export const AdminSales: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* Edit Sale Modal */}
+      {editingSale && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl animate-in fade-in zoom-in-95 my-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
+              <div className="flex items-center gap-2 text-blue-400">
+                <Pencil className="w-5 h-5" />
+                <h3 className="text-base font-bold text-white">Edit Sale {editingSale.receiptNumber}</h3>
+              </div>
+              <button onClick={() => setEditingSale(null)} className="text-slate-400 hover:text-white p-1">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-amber-200 text-xs mb-4">
+              <strong>Stock Recalculation:</strong> Editing this sale will reverse old quantities and apply new ones automatically.
+            </div>
+
+            <div className="space-y-3 mb-4">
+              <div>
+                <label className="block text-slate-300 font-medium mb-1">Edit Reason *</label>
+                <input
+                  type="text"
+                  value={editReason}
+                  onChange={e => setEditReason(e.target.value)}
+                  placeholder="e.g. Wrong quantity entered"
+                  className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
+                />
+              </div>
+
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {editItems.map((item, idx) => {
+                  const product = products.find(p => p.id === item.productId);
+                  return (
+                    <div key={idx} className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-2">
+                      <div className="flex-1">
+                        <span className="text-white text-xs font-semibold">{product?.name || 'Unknown'}</span>
+                        <span className="text-slate-500 text-[10px] block">{product?.sku || ''}</span>
+                      </div>
+                      <div className="w-20">
+                        <label className="text-[10px] text-slate-400 block">Qty</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={item.quantity}
+                          onChange={e => {
+                            const newItems = [...editItems];
+                            newItems[idx] = { ...newItems[idx], quantity: parseInt(e.target.value) || 0 };
+                            setEditItems(newItems);
+                          }}
+                          className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono text-center text-xs"
+                        />
+                      </div>
+                      <div className="w-24">
+                        <label className="text-[10px] text-slate-400 block">Unit Price</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={item.unitPrice}
+                          onChange={e => {
+                            const newItems = [...editItems];
+                            newItems[idx] = { ...newItems[idx], unitPrice: parseFloat(e.target.value) || 0 };
+                            setEditItems(newItems);
+                          }}
+                          className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono text-xs"
+                        />
+                      </div>
+                      <div className="w-20">
+                        <label className="text-[10px] text-slate-400 block">Discount</label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={item.discount || 0}
+                          onChange={e => {
+                            const newItems = [...editItems];
+                            newItems[idx] = { ...newItems[idx], discount: parseFloat(e.target.value) || 0 };
+                            setEditItems(newItems);
+                          }}
+                          className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-white font-mono text-xs"
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+              <button
+                onClick={() => setEditingSale(null)}
+                className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                disabled={isEditing}
+                className="px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-bold"
+              >
+                {isEditing ? 'Saving...' : 'Save Edit & Recalculate Stock'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Void Modal */}
       {voidingSale && (
