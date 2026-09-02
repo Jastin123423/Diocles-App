@@ -382,6 +382,7 @@ export class DebtService {
 
   /**
    * Delete or archive a debt record with ownership check
+   * Admin can delete any, Seller can only delete their own
    */
   public static deleteDebt(debtId: string, currentUser?: User): boolean {
     const rawDebts = db.getDebts();
@@ -393,7 +394,20 @@ export class DebtService {
       return false;
     }
 
+    // Delete from local database
     db.deleteDebt(debtId);
+
+    // CRITICAL FIX: Enqueue DELETE_DEBT sync operation
+    db.enqueueSync({
+      id: generateUUID(),
+      operation: 'DELETE_DEBT',
+      entityType: 'DEBT',
+      entityId: debtId,
+      payload: { id: debtId },
+      status: 'PENDING',
+      createdAt: new Date().toISOString(),
+    });
+
     return true;
   }
 }
