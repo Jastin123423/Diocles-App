@@ -1,4 +1,4 @@
-// src/services/syncService.ts (FIXED - Deletes sync correctly)
+// src/services/syncService.ts (OPTIMIZED - 60s interval, sync only when pending data)
 import { db } from '../db/storage';
 import { SyncQueueItem, User } from '../types';
 import { CloudflareApi } from './cloudflareApi';
@@ -9,6 +9,36 @@ export class SyncService {
   private static isSimulatingSync = false;
   private static isSyncing = false;
   private static lastSyncedAt: string | null = localStorage.getItem('omnibiz_last_synced_at');
+  private static lastSyncAttempt: number = 0;
+  private static readonly SYNC_INTERVAL_MS = 60000; // 60 seconds minimum between background syncs
+  private static hasLocalChanges = false;
+
+  /**
+   * Mark that local data has changed and needs syncing.
+   * Call this whenever any local write happens (create, update, delete).
+   */
+  public static markLocalChanged(): void {
+    this.hasLocalChanges = true;
+  }
+
+  /**
+   * Check if sync should run:
+   * - Always if there are pending items in queue
+   * - Only after 60s interval if there are local changes
+   */
+  public static shouldSync(): boolean {
+    const pendingCount = this.getPendingCount();
+    
+    // Always sync if there are pending items
+    if (pendingCount > 0) return true;
+    
+    // Check if 60 seconds have passed since last sync attempt
+    const now = Date.now();
+    const timeSinceLastSync = now - this.lastSyncAttempt;
+    
+    // Only sync after interval AND if there are local changes
+    return this.hasLocalChanges && timeSinceLastSync >= this.SYNC_INTERVAL_MS;
+  }
 
   public static getQueueItems(): SyncQueueItem[] {
     return db.getSyncQueue();
@@ -48,6 +78,15 @@ export class SyncService {
   }
 
   public static async processSyncQueue(currentUser?: User): Promise<{ success: boolean; processedCount: number; message?: string }> {
+    // Skip if sync not needed (no pending, no local changes, or too soon)
+    if (!this.shouldSync() && !this.isSyncing) {
+      return { 
+        success: true, 
+        processedCount: 0, 
+        message: 'Sync skipped - no pending changes' 
+      };
+    }
+
     // Try cloud sync first
     const online = await CloudflareApi.checkConnection();
     
@@ -64,6 +103,7 @@ export class SyncService {
     }
 
     SyncService.isSyncing = true;
+    this.lastSyncAttempt = Date.now();
 
     try {
       const queue = db.getSyncQueue();
@@ -90,23 +130,25 @@ export class SyncService {
           });
           db.saveSyncQueue(updatedQueue);
 
-          // FIX: Update lastSyncedAt immediately after push
-          // This prevents pulling back deleted items
+          // Update lastSyncedAt immediately after push
           this.lastSyncedAt = new Date().toISOString();
           localStorage.setItem('omnibiz_last_synced_at', this.lastSyncedAt);
         }
       }
 
-      // 2. PULL latest cloud data
-      // FIX: Use updated lastSyncedAt (after push)
-      const pullResult = await CloudflareApi.pullSync(this.lastSyncedAt || undefined);
-      
-      if (pullResult.success && pullResult.data) {
-        this.applyCloudData(pullResult.data);
-        this.lastSyncedAt = new Date().toISOString();
-        localStorage.setItem('omnibiz_last_synced_at', this.lastSyncedAt);
+      // 2. PULL latest cloud data (only if there were pending items OR local changes)
+      if (pendingItems.length > 0 || this.hasLocalChanges) {
+        const pullResult = await CloudflareApi.pullSync(this.lastSyncedAt || undefined);
+        
+        if (pullResult.success && pullResult.data) {
+          this.applyCloudData(pullResult.data);
+          this.lastSyncedAt = new Date().toISOString();
+          localStorage.setItem('omnibiz_last_synced_at', this.lastSyncedAt);
+        }
       }
 
+      // Reset local changes flag after successful sync
+      this.hasLocalChanges = false;
       SyncService.isSyncing = false;
 
       return {
@@ -211,6 +253,7 @@ export class SyncService {
           status: cloudUser.status,
           assignedShopIds: cloudUser.assigned_shop_ids ? JSON.parse(cloudUser.assigned_shop_ids) : [],
           avatarUrl: cloudUser.avatar_url || cloudUser.avatarUrl || null,
+          permissions: cloudUser.permissions ? JSON.parse(cloudUser.permissions) : {},
           createdAt: cloudUser.created_at,
           updatedAt: cloudUser.updated_at,
         };
