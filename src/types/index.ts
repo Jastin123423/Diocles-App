@@ -265,7 +265,7 @@ export interface AuditLog {
   userName: string;
   action: string;
   details: string;
-  entityType: 'PRODUCT' | 'SALE' | 'PURCHASE' | 'EXPENSE' | 'SELLER' | 'INVENTORY' | 'SETTINGS' | 'AUTH' | 'BACKUP' | 'SHOP' | 'IMPORT' | 'SALE_EDIT';
+  entityType: 'PRODUCT' | 'SALE' | 'PURCHASE' | 'EXPENSE' | 'SELLER' | 'INVENTORY' | 'SETTINGS' | 'AUTH' | 'BACKUP' | 'SHOP' | 'IMPORT' | 'SALE_EDIT' | 'DEBT';
   entityId?: string;
   shopId?: string;
   timestamp: string;
@@ -277,6 +277,7 @@ export type SyncOperation =
   | 'CREATE_PRODUCT'
   | 'UPDATE_PRODUCT'
   | 'TOGGLE_PRODUCT_STATUS'
+  | 'DELETE_PRODUCT'
   | 'CREATE_SALE'
   | 'UPDATE_SALE'
   | 'VOID_SALE'
@@ -285,13 +286,18 @@ export type SyncOperation =
   | 'CREATE_EXPENSE'
   | 'CREATE_SELLER'
   | 'UPDATE_SELLER'
+  | 'DELETE_SELLER'
   | 'STOCK_ADJUSTMENT'
   | 'UPDATE_SETTINGS'
   | 'CREATE_SHOP'
   | 'UPDATE_SHOP'
   | 'TOGGLE_SHOP_STATUS'
+  | 'DELETE_SHOP'
   | 'CREATE_SALE_EDIT_REQUEST'
-  | 'REVIEW_SALE_EDIT_REQUEST';
+  | 'REVIEW_SALE_EDIT_REQUEST'
+  | 'CREATE_DEBT'
+  | 'UPDATE_DEBT'
+  | 'DELETE_DEBT';
 
 export interface SyncQueueItem {
   id: string;
