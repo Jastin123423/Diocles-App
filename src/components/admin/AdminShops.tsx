@@ -15,6 +15,8 @@ import {
   FileText,
   AlertTriangle,
   Info,
+  Trash2,
+  X,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ShopService } from '../../services/shopService';
@@ -32,6 +34,7 @@ export const AdminShops: React.FC = () => {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [editingShop, setEditingShop] = useState<Shop | null>(null);
   const [deactivatingShop, setDeactivatingShop] = useState<Shop | null>(null);
+  const [deletingShop, setDeletingShop] = useState<Shop | null>(null);
 
   // Form inputs
   const [formData, setFormData] = useState({
@@ -193,6 +196,27 @@ export const AdminShops: React.FC = () => {
         description: res.error || 'Failed to toggle status.',
       });
     }
+  };
+
+  const handleDeleteShop = () => {
+    if (!deletingShop || !currentUser) return;
+
+    const res = ShopService.deleteShop(deletingShop.id, currentUser);
+
+    if (res.success) {
+      addToast({
+        type: 'success',
+        title: 'Shop Deleted',
+        description: `Shop "${deletingShop.name}" has been permanently deleted along with all related products and categories.`,
+      });
+    } else {
+      addToast({
+        type: 'error',
+        title: 'Delete Failed',
+        description: res.error || 'Could not delete shop.',
+      });
+    }
+    setDeletingShop(null);
   };
 
   const handleSelectAndJump = (shopId: string, tab: string) => {
@@ -391,6 +415,14 @@ export const AdminShops: React.FC = () => {
                   >
                     {isActive ? <XCircle className="w-3.5 h-3.5" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
                   </button>
+
+                  <button
+                    onClick={() => setDeletingShop(shop)}
+                    className="p-1.5 text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 rounded transition"
+                    title="Delete Shop"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             </div>
@@ -421,6 +453,53 @@ export const AdminShops: React.FC = () => {
         </div>
       )}
 
+      {/* Delete Shop Confirmation Modal */}
+      {deletingShop && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs">
+          <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div className="p-5">
+              <div className="flex items-center gap-3 mb-3 text-rose-400">
+                <Trash2 className="w-6 h-6 shrink-0" />
+                <h3 className="font-bold text-sm text-white">Delete Shop "{deletingShop.name}"?</h3>
+              </div>
+
+              <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-200 text-xs mb-4">
+                <strong>Warning:</strong> This action is permanent and cannot be undone.
+              </div>
+
+              <p className="text-xs text-slate-300 leading-relaxed mb-4">
+                Deleting this shop will permanently remove:
+                <br /><br />
+                • All products in this shop ({shopMetrics[deletingShop.id]?.productsCount || 0} products)
+                <br />
+                • All categories assigned to this shop
+                <br />
+                • Shop assignment from all sellers
+                <br /><br />
+                <strong className="text-amber-400">Note:</strong> Historical sales records will be preserved for reporting purposes.
+              </p>
+
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setDeletingShop(null)}
+                  className="px-4 py-2 rounded text-xs font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteShop}
+                  className="px-5 py-2 rounded text-xs font-semibold shadow-sm transition text-white bg-rose-600 hover:bg-rose-500"
+                >
+                  Delete Shop Permanently
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* CREATE / EDIT MODAL */}
       {(isCreateModalOpen || editingShop) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-xs">
@@ -439,7 +518,7 @@ export const AdminShops: React.FC = () => {
                 }}
                 className="text-slate-400 hover:text-white p-1 rounded"
               >
-                ✕
+                <X className="w-4 h-4" />
               </button>
             </div>
 
