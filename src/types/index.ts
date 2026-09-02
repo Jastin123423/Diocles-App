@@ -125,7 +125,44 @@ export interface Sale {
   items: SaleItem[];
 }
 
-export type MovementType = 'SALE' | 'PURCHASE' | 'ADJUSTMENT' | 'CORRECTION' | 'RETURN' | 'VOID_RETURN' | 'DAMAGED' | 'BROKEN' | 'EXPIRED' | 'LOST';
+// ==========================================
+// SALE EDIT REQUEST (APPROVAL WORKFLOW)
+// ==========================================
+export type SaleEditRequestStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+
+export interface SaleEditRequest {
+  id: string;
+  saleId: string;
+  requestedByUserId: string;
+  requestedByName: string;
+  originalValues: {
+    items: SaleItem[];
+    total: number;
+    subtotal: number;
+    grossProfit: number;
+    costOfGoods: number;
+    amountReceived: number;
+    change: number;
+  };
+  newValues: {
+    items: SaleItem[];
+    total: number;
+    subtotal: number;
+    grossProfit: number;
+    costOfGoods: number;
+    amountReceived: number;
+    change: number;
+  };
+  reason: string;
+  status: SaleEditRequestStatus;
+  reviewedByUserId?: string;
+  reviewedByName?: string;
+  reviewNote?: string;
+  createdAt: string;
+  reviewedAt?: string;
+}
+
+export type MovementType = 'SALE' | 'PURCHASE' | 'PURCHASE_EDIT' | 'ADJUSTMENT' | 'CORRECTION' | 'RETURN' | 'VOID_RETURN' | 'DAMAGED' | 'BROKEN' | 'EXPIRED' | 'LOST';
 
 export interface InventoryMovement {
   id: string;
@@ -171,6 +208,7 @@ export interface Purchase {
   createdByUserId: string;
   createdByName: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export type ExpenseCategory =
@@ -227,7 +265,7 @@ export interface AuditLog {
   userName: string;
   action: string;
   details: string;
-  entityType: 'PRODUCT' | 'SALE' | 'PURCHASE' | 'EXPENSE' | 'SELLER' | 'INVENTORY' | 'SETTINGS' | 'AUTH' | 'BACKUP' | 'SHOP' | 'IMPORT';
+  entityType: 'PRODUCT' | 'SALE' | 'PURCHASE' | 'EXPENSE' | 'SELLER' | 'INVENTORY' | 'SETTINGS' | 'AUTH' | 'BACKUP' | 'SHOP' | 'IMPORT' | 'SALE_EDIT';
   entityId?: string;
   shopId?: string;
   timestamp: string;
@@ -240,8 +278,10 @@ export type SyncOperation =
   | 'UPDATE_PRODUCT'
   | 'TOGGLE_PRODUCT_STATUS'
   | 'CREATE_SALE'
+  | 'UPDATE_SALE'
   | 'VOID_SALE'
   | 'CREATE_PURCHASE'
+  | 'UPDATE_PURCHASE'
   | 'CREATE_EXPENSE'
   | 'CREATE_SELLER'
   | 'UPDATE_SELLER'
@@ -249,7 +289,9 @@ export type SyncOperation =
   | 'UPDATE_SETTINGS'
   | 'CREATE_SHOP'
   | 'UPDATE_SHOP'
-  | 'TOGGLE_SHOP_STATUS';
+  | 'TOGGLE_SHOP_STATUS'
+  | 'CREATE_SALE_EDIT_REQUEST'
+  | 'REVIEW_SALE_EDIT_REQUEST';
 
 export interface SyncQueueItem {
   id: string;
@@ -382,6 +424,9 @@ export type NotificationType =
   | 'PRICE_CHANGE_SELLER'     // [Product] zimebadilishwa bei sasa zitauzwa Sh [Price] (Shop-specific)
   | 'PRICE_CHANGE_ADMIN'      // Taarifa imetumwa kwa wauzaji wa [Shop] juu ya mabadiliko ya bei ya [Product]
   | 'LOSS_OCCURRED'
+  | 'SALE_EDIT_REQUESTED'     // New: Sale edit request notification
+  | 'SALE_EDIT_APPROVED'      // New: Sale edit approved notification
+  | 'SALE_EDIT_REJECTED'      // New: Sale edit rejected notification
   | 'SYSTEM_EVENT';
 
 export interface AppNotification {
@@ -396,7 +441,7 @@ export interface AppNotification {
   targetUserIds?: string[];
   targetRole?: 'ADMIN' | 'SELLER' | 'ALL';
   relatedEntityId?: string;
-  relatedEntityType?: 'DEBT' | 'PRODUCT' | 'SHOP' | 'SALE';
+  relatedEntityType?: 'DEBT' | 'PRODUCT' | 'SHOP' | 'SALE' | 'SALE_EDIT_REQUEST';
   createdAt: string;
   readByUserIds: string[]; // List of user IDs who marked this notification as read
 }
