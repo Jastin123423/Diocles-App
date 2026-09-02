@@ -1,4 +1,4 @@
-// src/services/syncService.ts (COMPLETE WITH AVATAR URL)
+// src/services/syncService.ts (FIXED - Deletes sync correctly)
 import { db } from '../db/storage';
 import { SyncQueueItem, User } from '../types';
 import { CloudflareApi } from './cloudflareApi';
@@ -89,10 +89,16 @@ export class SyncService {
             return item;
           });
           db.saveSyncQueue(updatedQueue);
+
+          // FIX: Update lastSyncedAt immediately after push
+          // This prevents pulling back deleted items
+          this.lastSyncedAt = new Date().toISOString();
+          localStorage.setItem('omnibiz_last_synced_at', this.lastSyncedAt);
         }
       }
 
       // 2. PULL latest cloud data
+      // FIX: Use updated lastSyncedAt (after push)
       const pullResult = await CloudflareApi.pullSync(this.lastSyncedAt || undefined);
       
       if (pullResult.success && pullResult.data) {
@@ -291,7 +297,6 @@ export class SyncService {
       cloudData.sales.forEach((cloudSale: any) => {
         const index = mergedSales.findIndex(s => s.id === cloudSale.id);
         
-        // Find items for this sale
         const saleItems = (cloudData.saleItems || [])
           .filter((item: any) => item.sale_id === cloudSale.id)
           .map((item: any) => ({
@@ -348,7 +353,6 @@ export class SyncService {
       cloudData.purchases.forEach((cloudPurchase: any) => {
         const index = mergedPurchases.findIndex(p => p.id === cloudPurchase.id);
         
-        // Find items for this purchase
         const purchaseItems = (cloudData.purchaseItems || [])
           .filter((item: any) => item.purchase_id === cloudPurchase.id)
           .map((item: any) => ({
