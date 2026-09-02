@@ -1,5 +1,5 @@
 import { db } from '../db/storage';
-import { User, UserStatus } from '../types';
+import { User, UserStatus, SellerPermissions } from '../types';
 import { generateUUID, hashPassword } from '../utils/crypto';
 
 export class SellerService {
@@ -30,7 +30,7 @@ export class SellerService {
   }
 
   /**
-   * Admin creates a new seller with assigned shops.
+   * Admin creates a new seller with assigned shops and permissions.
    */
   public static async createSeller(
     params: {
@@ -40,6 +40,7 @@ export class SellerService {
       color?: string;
       status?: UserStatus;
       assignedShopIds?: string[];
+      permissions?: SellerPermissions;
     },
     currentUser: User
   ): Promise<{ success: boolean; seller?: User; error?: string }> {
@@ -69,6 +70,7 @@ export class SellerService {
       status: params.status || 'ACTIVE',
       assignedShopIds: params.assignedShopIds && params.assignedShopIds.length > 0 ? params.assignedShopIds : [],
       avatarUrl: null,
+      permissions: params.permissions || {},
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -90,6 +92,7 @@ export class SellerService {
         status: newSeller.status,
         assignedShopIds: newSeller.assignedShopIds,
         avatarUrl: newSeller.avatarUrl || null,
+        permissions: newSeller.permissions || {},
         createdAt: newSeller.createdAt,
         updatedAt: newSeller.updatedAt,
       },
@@ -112,7 +115,7 @@ export class SellerService {
   }
 
   /**
-   * Admin updates a seller (name, color, status, assignedShopIds, optional new password).
+   * Admin updates a seller (name, color, status, assignedShopIds, permissions).
    */
   public static updateSeller(
     sellerId: string,
@@ -121,6 +124,7 @@ export class SellerService {
       color?: string;
       status?: UserStatus;
       assignedShopIds?: string[];
+      permissions?: SellerPermissions;
     },
     currentUser: User
   ): { success: boolean; seller?: User; error?: string } {
@@ -152,6 +156,10 @@ export class SellerService {
       seller.assignedShopIds = params.assignedShopIds;
     }
 
+    if (params.permissions !== undefined) {
+      seller.permissions = params.permissions;
+    }
+
     seller.updatedAt = new Date().toISOString();
     users[index] = seller;
     db.saveUsers(users);
@@ -171,6 +179,7 @@ export class SellerService {
         status: seller.status,
         assignedShopIds: seller.assignedShopIds,
         avatarUrl: seller.avatarUrl || null,
+        permissions: seller.permissions || {},
         createdAt: seller.createdAt,
         updatedAt: seller.updatedAt,
       },
@@ -283,6 +292,7 @@ export class SellerService {
         status: user.status,
         assignedShopIds: user.assignedShopIds,
         avatarUrl: user.avatarUrl || null,
+        permissions: user.permissions || {},
         createdAt: user.createdAt,
         updatedAt: user.updatedAt,
       },
