@@ -15,6 +15,7 @@ import {
   Store,
   Camera,
   Upload,
+  Trash2,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { SellerService } from '../../services/sellerService';
@@ -33,6 +34,7 @@ export const AdminSellers: React.FC = () => {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
   const [selectedSeller, setSelectedSeller] = useState<User | null>(null);
+  const [deletingSeller, setDeletingSeller] = useState<User | null>(null);
 
   // Form states
   const [name, setName] = useState('');
@@ -297,6 +299,27 @@ export const AdminSellers: React.FC = () => {
     }
   };
 
+  const handleDeleteSeller = () => {
+    if (!deletingSeller || !currentUser) return;
+
+    const res = SellerService.deleteSeller(deletingSeller.id, currentUser);
+
+    if (res.success) {
+      addToast({
+        type: 'success',
+        title: 'Seller Deleted',
+        description: `${deletingSeller.name} (@${deletingSeller.username}) has been permanently deleted.`,
+      });
+    } else {
+      addToast({
+        type: 'error',
+        title: 'Delete Failed',
+        description: res.error || 'Could not delete seller.',
+      });
+    }
+    setDeletingSeller(null);
+  };
+
   return (
     <div id="admin-sellers-view" className="flex-1 p-6 bg-slate-950 text-slate-100 overflow-y-auto space-y-6">
       {/* Hidden file input for avatar uploads */}
@@ -325,14 +348,6 @@ export const AdminSellers: React.FC = () => {
           <UserPlus className="w-4 h-4" />
           <span>New Seller Account</span>
         </button>
-      </div>
-
-      {/* Strict Data Integrity Notice */}
-      <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl flex items-start gap-3">
-        <Shield className="w-5 h-5 text-blue-400 shrink-0 mt-0.5" />
-        <div className="text-xs text-slate-300">
-          <strong className="text-white">Commercial Audit Safety:</strong> To protect financial history, sellers are never permanently deleted from the database. Deactivating a seller prevents future POS logins while retaining all historical receipts, commissions, and revenue logs.
-        </div>
       </div>
 
       {/* Sellers Cards Grid */}
@@ -461,7 +476,7 @@ export const AdminSellers: React.FC = () => {
               </div>
 
               {/* Action Toolbar */}
-              <div className="grid grid-cols-3 gap-1.5 pt-3 border-t border-slate-800 text-xs">
+              <div className="grid grid-cols-4 gap-1.5 pt-3 border-t border-slate-800 text-xs">
                 <button
                   onClick={() => openEditModal(seller)}
                   className="py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium transition flex items-center justify-center gap-1"
@@ -489,11 +504,61 @@ export const AdminSellers: React.FC = () => {
                   <Power className="w-3.5 h-3.5" />
                   <span>{isActive ? 'Disable' : 'Enable'}</span>
                 </button>
+
+                <button
+                  onClick={() => setDeletingSeller(seller)}
+                  className="py-1.5 rounded-lg bg-slate-800 hover:bg-rose-600 hover:text-white text-slate-400 font-medium transition flex items-center justify-center gap-1"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete</span>
+                </button>
               </div>
             </div>
           );
         })}
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {deletingSeller && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-in fade-in zoom-in-95">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
+              <div className="flex items-center gap-2 text-rose-400">
+                <Trash2 className="w-5 h-5" />
+                <h3 className="text-base font-bold text-white">Delete Seller?</h3>
+              </div>
+              <button onClick={() => setDeletingSeller(null)} className="text-slate-400 hover:text-white p-1">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-200 text-xs mb-4">
+              <strong>Warning:</strong> This action is permanent and cannot be undone.
+            </div>
+
+            <p className="text-xs text-slate-400 mb-4">
+              Are you sure you want to delete <strong className="text-white">{deletingSeller.name}</strong> (@{deletingSeller.username})?
+              <br /><br />
+              This will permanently remove the seller account. Historical sales records will be preserved.
+            </p>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
+              <button
+                onClick={() => setDeletingSeller(null)}
+                className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleDeleteSeller}
+                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition"
+              >
+                Delete Seller
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal: Create Seller */}
       {isAddModalOpen && (
