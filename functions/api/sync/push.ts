@@ -70,10 +70,18 @@ async function processOperation(db: any, op: any) {
       await upsertShop(db, payload);
       break;
     
+    case 'DELETE_SHOP':
+      await deleteShop(db, payload);
+      break;
+    
     case 'CREATE_PRODUCT':
     case 'UPDATE_PRODUCT':
     case 'TOGGLE_PRODUCT_STATUS':
       await upsertProduct(db, payload);
+      break;
+    
+    case 'DELETE_PRODUCT':
+      await deleteProduct(db, payload);
       break;
     
     case 'CREATE_CATEGORY':
@@ -110,6 +118,10 @@ async function processOperation(db: any, op: any) {
       await upsertUser(db, payload);
       break;
     
+    case 'DELETE_SELLER':
+      await deleteSeller(db, payload);
+      break;
+    
     case 'STOCK_ADJUSTMENT':
       await recordStockAdjustment(db, payload);
       break;
@@ -139,6 +151,32 @@ async function processOperation(db: any, op: any) {
   }
 
   return { entityType: op.entityType, entityId: op.entityId };
+}
+
+async function deleteShop(db: any, payload: any) {
+  // Delete related records first (foreign key cascade)
+  await db.prepare('DELETE FROM product_images WHERE product_id IN (SELECT id FROM products WHERE shop_id = ?)').bind(payload.id).run();
+  await db.prepare('DELETE FROM inventory_movements WHERE shop_id = ?').bind(payload.id).run();
+  await db.prepare('DELETE FROM purchase_items WHERE purchase_id IN (SELECT id FROM purchases WHERE shop_id = ?)').bind(payload.id).run();
+  await db.prepare('DELETE FROM purchases WHERE shop_id = ?').bind(payload.id).run();
+  await db.prepare('DELETE FROM sale_items WHERE sale_id IN (SELECT id FROM sales WHERE shop_id = ?)').bind(payload.id).run();
+  await db.prepare('DELETE FROM sales WHERE shop_id = ?').bind(payload.id).run();
+  await db.prepare('DELETE FROM products WHERE shop_id = ?').bind(payload.id).run();
+  await db.prepare('DELETE FROM categories WHERE shop_id = ?').bind(payload.id).run();
+  await db.prepare('DELETE FROM expenses WHERE shop_id = ?').bind(payload.id).run();
+  await db.prepare('DELETE FROM shops WHERE id = ?').bind(payload.id).run();
+}
+
+async function deleteProduct(db: any, payload: any) {
+  await db.prepare('DELETE FROM product_images WHERE product_id = ?').bind(payload.id).run();
+  await db.prepare('DELETE FROM inventory_movements WHERE product_id = ?').bind(payload.id).run();
+  await db.prepare('DELETE FROM purchase_items WHERE product_id = ?').bind(payload.id).run();
+  await db.prepare('DELETE FROM sale_items WHERE product_id = ?').bind(payload.id).run();
+  await db.prepare('DELETE FROM products WHERE id = ?').bind(payload.id).run();
+}
+
+async function deleteSeller(db: any, payload: any) {
+  await db.prepare('DELETE FROM users WHERE id = ? AND role = ?').bind(payload.id, 'SELLER').run();
 }
 
 async function upsertShop(db: any, shop: any) {
