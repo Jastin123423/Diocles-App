@@ -42,7 +42,9 @@ export const AdminInventory: React.FC = () => {
   const [reasonInput, setReasonInput] = useState('');
   const [modalError, setModalError] = useState('');
 
-  if (!currentUser || currentUser.role !== 'ADMIN') return null;
+  // Permission check: Admin OR Seller with canManageInventory
+  if (!currentUser) return null;
+  if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canManageInventory) return null;
 
   const settings = dbState.settings;
   const valuation = InventoryService.getInventoryValuation(selectedShopId, currentUser);
