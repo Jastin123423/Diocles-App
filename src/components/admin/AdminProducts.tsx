@@ -70,7 +70,9 @@ export const AdminProducts: React.FC = () => {
   const [catColorInput, setCatColorInput] = useState('#3b82f6');
   const [catModalError, setCatModalError] = useState('');
 
-  if (!currentUser || currentUser.role !== 'ADMIN') return null;
+  // Permission check: Admin OR Seller with canEditProducts/canDeleteProducts
+  if (!currentUser) return null;
+  if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canEditProducts && !currentUser.permissions?.canDeleteProducts) return null;
 
   const settings = dbState.settings;
   const categories = dbState.categories || [];
@@ -569,31 +571,37 @@ export const AdminProducts: React.FC = () => {
                             </span>
                           </td>
                           <td className="py-3.5 px-4 text-right space-x-2">
-                            <button
-                              onClick={() => openEditModal(product)}
-                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
-                              title="Edit product"
-                            >
-                              <Edit className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => handleToggleStatus(product)}
-                              className={`p-1.5 rounded-lg transition ${
-                                product.status === 'ACTIVE'
-                                  ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400'
-                                  : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400'
-                              }`}
-                              title={product.status === 'ACTIVE' ? 'Deactivate Product' : 'Activate Product'}
-                            >
-                              <Power className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              onClick={() => setDeletingProduct(product)}
-                              className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition"
-                              title="Delete product"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            {currentUser.permissions?.canEditProducts && (
+                              <>
+                                <button
+                                  onClick={() => openEditModal(product)}
+                                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+                                  title="Edit product"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  onClick={() => handleToggleStatus(product)}
+                                  className={`p-1.5 rounded-lg transition ${
+                                    product.status === 'ACTIVE'
+                                      ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400'
+                                      : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400'
+                                  }`}
+                                  title={product.status === 'ACTIVE' ? 'Deactivate Product' : 'Activate Product'}
+                                >
+                                  <Power className="w-3.5 h-3.5" />
+                                </button>
+                              </>
+                            )}
+                            {currentUser.permissions?.canDeleteProducts && (
+                              <button
+                                onClick={() => setDeletingProduct(product)}
+                                className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition"
+                                title="Delete product"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       );
@@ -620,13 +628,15 @@ export const AdminProducts: React.FC = () => {
               </p>
             </div>
 
-            <button
-              onClick={() => openAddCategoryModal()}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-sm"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Add Category</span>
-            </button>
+            {currentUser.permissions?.canEditProducts && (
+              <button
+                onClick={() => openAddCategoryModal()}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-sm"
+              >
+                <Plus className="w-4 h-4" />
+                <span>Add Category</span>
+              </button>
+            )}
           </div>
 
           {/* Categories List */}
@@ -663,10 +673,12 @@ export const AdminProducts: React.FC = () => {
                         {isActive ? 'Active' : 'Inactive'}
                       </span>
                     </div>
-                    <div className="flex gap-2">
-                      <button onClick={() => openEditCategoryModal(cat)} className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-xs">Edit</button>
-                      <button onClick={() => handleToggleCategoryStatus(cat)} className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-xs">Toggle</button>
-                    </div>
+                    {currentUser.permissions?.canEditProducts && (
+                      <div className="flex gap-2">
+                        <button onClick={() => openEditCategoryModal(cat)} className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-xs">Edit</button>
+                        <button onClick={() => handleToggleCategoryStatus(cat)} className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-xs">Toggle</button>
+                      </div>
+                    )}
                   </div>
                 );
               })
@@ -772,7 +784,7 @@ export const AdminProducts: React.FC = () => {
                 />
               </div>
 
-              {/* 3. Purchasing Price & Selling Price - MOVED UP */}
+              {/* 3. Purchasing Price & Selling Price */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Purchasing Price</label>
@@ -802,7 +814,7 @@ export const AdminProducts: React.FC = () => {
                 </div>
               </div>
 
-              {/* 4. Initial Stock & Min Threshold - MOVED UP */}
+              {/* 4. Initial Stock & Min Threshold */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">
@@ -831,19 +843,21 @@ export const AdminProducts: React.FC = () => {
                 </div>
               </div>
 
-              {/* 5. Category & Unit - MOVED DOWN */}
+              {/* 5. Category & Unit */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="block text-slate-300 font-medium">Category *</label>
-                    <button
-                      type="button"
-                      onClick={() => openAddCategoryModal(productShopId)}
-                      className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-0.5"
-                    >
-                      <Plus className="w-3 h-3" />
-                      <span>New</span>
-                    </button>
+                    {currentUser.permissions?.canEditProducts && (
+                      <button
+                        type="button"
+                        onClick={() => openAddCategoryModal(productShopId)}
+                        className="text-[10px] text-blue-400 hover:text-blue-300 flex items-center gap-0.5"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>New</span>
+                      </button>
+                    )}
                   </div>
                   <select
                     value={categoryId}
@@ -886,7 +900,7 @@ export const AdminProducts: React.FC = () => {
                 </div>
               </div>
 
-              {/* 6. SKU & Barcode - MOVED DOWN */}
+              {/* 6. SKU & Barcode */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">SKU / Code</label>
