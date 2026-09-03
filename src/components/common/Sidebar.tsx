@@ -16,6 +16,8 @@ import {
   Store,
   FileText,
   Bell,
+  DollarSign,
+  Shield,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { NotificationService } from '../../services/notificationService';
@@ -26,6 +28,7 @@ interface NavItem {
   icon: React.ElementType;
   badge?: number | string;
   badgeColor?: 'red' | 'amber' | 'blue';
+  requiresPermission?: keyof import('../../types').SellerPermissions;
 }
 
 export const Sidebar: React.FC = () => {
@@ -33,6 +36,13 @@ export const Sidebar: React.FC = () => {
 
   const isSeller = currentUser?.role === 'SELLER';
   const isAdmin = currentUser?.role === 'ADMIN';
+  const sellerPermissions = currentUser?.permissions || {};
+
+  // Check if seller has a specific permission
+  const hasPermission = (perm: keyof import('../../types').SellerPermissions): boolean => {
+    if (isAdmin) return true;
+    return !!sellerPermissions[perm];
+  };
 
   // Count low-stock items
   const lowStockCount = (dbState.products || []).filter(
@@ -50,11 +60,20 @@ export const Sidebar: React.FC = () => {
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
     { id: 'new_sale', label: 'New Sale (POS)', icon: ShoppingCart },
     { id: 'products', label: 'Products', icon: Package, badge: lowStockCount > 0 ? lowStockCount : undefined },
+    
+    // Purchases - show if seller has permission OR always show for basic stock-in
     { id: 'purchases', label: 'Purchases & Stock In', icon: Truck },
+    
     { id: 'my_sales', label: 'My Sales', icon: History },
     { id: 'debts', label: 'Madeni (Debts)', icon: FileText, badge: overdueDebtsCount > 0 ? `${overdueDebtsCount} Overdue` : debts.filter(d => d.status !== 'PAID').length || undefined, badgeColor: overdueDebtsCount > 0 ? 'red' : 'amber' },
     { id: 'notifications', label: 'Taarifa & Vikumbusho', icon: Bell, badge: unreadNotifsCount > 0 ? unreadNotifsCount : undefined, badgeColor: 'red' },
     { id: 'receipts', label: 'Receipts', icon: Receipt },
+    
+    // Permission-gated items
+    { id: 'inventory', label: 'Inventory Management', icon: Boxes, requiresPermission: 'canManageInventory' },
+    { id: 'expenses', label: 'Expenses', icon: DollarSign, requiresPermission: 'canViewExpenses' },
+    { id: 'reports', label: 'Reports', icon: BarChart3, requiresPermission: 'canViewReports' },
+    
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
@@ -75,8 +94,13 @@ export const Sidebar: React.FC = () => {
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
 
-
-  const items = isSeller ? sellerNav : adminNav;
+  // Filter items based on permissions
+  const items = (isSeller ? sellerNav : adminNav).filter(item => {
+    if (item.requiresPermission) {
+      return hasPermission(item.requiresPermission);
+    }
+    return true;
+  });
 
   return (
     <aside
@@ -134,7 +158,6 @@ export const Sidebar: React.FC = () => {
                     {item.badge}
                   </span>
                 )}
-
               </button>
             );
           })}
