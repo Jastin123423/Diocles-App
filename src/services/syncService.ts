@@ -1,4 +1,4 @@
-// src/services/syncService.ts (OPTIMIZED - 60s interval, sync only when pending data)
+// src/services/syncService.ts (OPTIMIZED - 60s interval, sync only when pending data, permissions parsing fixed)
 import { db } from '../db/storage';
 import { SyncQueueItem, User } from '../types';
 import { CloudflareApi } from './cloudflareApi';
@@ -236,13 +236,40 @@ export class SyncService {
       db.saveShops(merged);
     }
 
-    // Apply users
+    // Apply users - WITH PERMISSIONS PARSING FIX
     if (cloudData.users && cloudData.users.length > 0) {
       const localUsers = db.getUsers();
       const mergedUsers = [...localUsers];
       
       cloudData.users.forEach((cloudUser: any) => {
         const index = mergedUsers.findIndex(u => u.id === cloudUser.id);
+        
+        // FIX: Handle permissions that may be a string OR object
+        let parsedPermissions: any = {};
+        try {
+          if (cloudUser.permissions) {
+            parsedPermissions = typeof cloudUser.permissions === 'string' 
+              ? JSON.parse(cloudUser.permissions) 
+              : cloudUser.permissions;
+          }
+        } catch (e) {
+          console.warn('Failed to parse permissions for user:', cloudUser.id, e);
+          parsedPermissions = {};
+        }
+        
+        // FIX: Handle assigned_shop_ids that may be a string OR array
+        let parsedShopIds: string[] = [];
+        try {
+          if (cloudUser.assigned_shop_ids) {
+            parsedShopIds = typeof cloudUser.assigned_shop_ids === 'string' 
+              ? JSON.parse(cloudUser.assigned_shop_ids) 
+              : cloudUser.assigned_shop_ids;
+          }
+        } catch (e) {
+          console.warn('Failed to parse assigned_shop_ids for user:', cloudUser.id, e);
+          parsedShopIds = [];
+        }
+        
         const userData = {
           id: cloudUser.id,
           username: cloudUser.username,
@@ -251,9 +278,9 @@ export class SyncService {
           passwordHash: cloudUser.password_hash,
           color: cloudUser.color,
           status: cloudUser.status,
-          assignedShopIds: cloudUser.assigned_shop_ids ? JSON.parse(cloudUser.assigned_shop_ids) : [],
+          assignedShopIds: parsedShopIds,
           avatarUrl: cloudUser.avatar_url || cloudUser.avatarUrl || null,
-          permissions: cloudUser.permissions ? JSON.parse(cloudUser.permissions) : {},
+          permissions: parsedPermissions,
           createdAt: cloudUser.created_at,
           updatedAt: cloudUser.updated_at,
         };
