@@ -39,7 +39,12 @@ export const AdminPurchases: React.FC = () => {
   const [items, setItems] = useState<PurchaseItemInput[]>([]);
   const [formError, setFormError] = useState('');
 
+  // Permission check: Admin OR Seller with canRecordPurchases/canViewPurchases
   if (!currentUser) return null;
+  if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canRecordPurchases && !currentUser.permissions?.canViewPurchases) return null;
+
+  // Permission flag
+  const canRecordPurchase = currentUser.role === 'ADMIN' || currentUser.permissions?.canRecordPurchases;
 
   const settings = dbState.settings;
   const isSeller = currentUser.role === 'SELLER';
@@ -219,7 +224,7 @@ export const AdminPurchases: React.FC = () => {
           invoiceNumber: invoiceNumber.trim() || undefined,
           paymentStatus,
           notes,
-          items: finalItems, // Include items for stock recalculation
+          items: finalItems,
         },
         currentUser
       );
@@ -274,14 +279,16 @@ export const AdminPurchases: React.FC = () => {
           </p>
         </div>
 
-        <button
-          id="new-purchase-btn"
-          onClick={openNewPurchaseModal}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-lg transition"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Record Supplier Purchase</span>
-        </button>
+        {canRecordPurchase && (
+          <button
+            id="new-purchase-btn"
+            onClick={openNewPurchaseModal}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-lg transition"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Record Supplier Purchase</span>
+          </button>
+        )}
       </div>
 
       {/* Toolbar */}
@@ -314,13 +321,15 @@ export const AdminPurchases: React.FC = () => {
                 <th className="py-3 px-4 font-semibold">Items Received</th>
                 <th className="py-3 px-4 font-semibold">Payment Status</th>
                 <th className="py-3 px-4 text-right font-semibold">Total Cost</th>
-                <th className="py-3 px-4 text-right font-semibold">Actions</th>
+                {canRecordPurchase && (
+                  <th className="py-3 px-4 text-right font-semibold">Actions</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
               {purchases.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-10 text-center text-slate-500">
+                  <td colSpan={canRecordPurchase ? 7 : 6} className="py-10 text-center text-slate-500">
                     <Truck className="w-8 h-8 mx-auto mb-2 opacity-40" />
                     <p>No supplier purchases recorded yet.</p>
                   </td>
@@ -355,15 +364,17 @@ export const AdminPurchases: React.FC = () => {
                     <td className="py-3.5 px-4 text-right font-mono font-bold text-white text-sm">
                       {formatCurrency(purchase.totalAmount, settings.currencySymbol)}
                     </td>
-                    <td className="py-3.5 px-4 text-right space-x-1.5">
-                      <button
-                        onClick={() => openEditPurchase(purchase)}
-                        className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium transition"
-                      >
-                        <Pencil className="w-3 h-3 inline mr-1" />
-                        Edit
-                      </button>
-                    </td>
+                    {canRecordPurchase && (
+                      <td className="py-3.5 px-4 text-right space-x-1.5">
+                        <button
+                          onClick={() => openEditPurchase(purchase)}
+                          className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-medium transition"
+                        >
+                          <Pencil className="w-3 h-3 inline mr-1" />
+                          Edit
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))
               )}
@@ -372,8 +383,8 @@ export const AdminPurchases: React.FC = () => {
         </div>
       </div>
 
-      {/* Modal: New/Edit Purchase */}
-      {isModalOpen && (
+      {/* Modal: New/Edit Purchase - Only if canRecordPurchase */}
+      {isModalOpen && canRecordPurchase && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl animate-in fade-in zoom-in-95 my-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
@@ -447,7 +458,7 @@ export const AdminPurchases: React.FC = () => {
                 </div>
               </div>
 
-              {/* Line Items Table - Always visible for both new and edit */}
+              {/* Line Items Table */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="block text-slate-300 font-semibold uppercase tracking-wider text-[11px]">
@@ -471,8 +482,6 @@ export const AdminPurchases: React.FC = () => {
 
                 <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
                   {items.map((item, idx) => {
-                    const selectedProduct = dbState.products.find(p => p.id === item.productId);
-                    
                     return (
                       <div
                         key={idx}
