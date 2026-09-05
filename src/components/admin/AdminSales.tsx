@@ -47,7 +47,14 @@ export const AdminSales: React.FC = () => {
   // Show pending edit requests
   const [showEditRequests, setShowEditRequests] = useState(false);
 
-  if (!currentUser || currentUser.role !== 'ADMIN') return null;
+  // Permission check: Admin OR Seller with canEditSales/canDeleteSales
+  if (!currentUser) return null;
+  if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canEditSales && !currentUser.permissions?.canDeleteSales) return null;
+
+  // Permission flags
+  const canEditSale = currentUser.role === 'ADMIN' || currentUser.permissions?.canEditSales;
+  const canVoidSale = currentUser.role === 'ADMIN' || currentUser.permissions?.canDeleteSales;
+  const isAdmin = currentUser.role === 'ADMIN';
 
   const settings = dbState.settings;
   const sellers = dbState.users.filter(u => u.role === 'SELLER');
@@ -120,11 +127,10 @@ export const AdminSales: React.FC = () => {
     setEditReason('');
   };
 
-  // Handle save edit - Admin only, reason optional
+  // Handle save edit
   const handleSaveEdit = () => {
     if (!editingSale || !currentUser) return;
 
-    // Reason is optional for admin
     setIsEditing(true);
     const result = SalesService.requestSaleEdit(
       editingSale.id,
@@ -137,8 +143,10 @@ export const AdminSales: React.FC = () => {
     if (result.success) {
       addToast({
         type: 'success',
-        title: 'Sale Edited Successfully',
-        description: `Receipt #${editingSale.receiptNumber} updated. Stock recalculated.`,
+        title: result.requiresApproval ? 'Edit Request Sent' : 'Sale Edited Successfully',
+        description: result.requiresApproval 
+          ? 'Your edit request has been sent for admin approval.' 
+          : `Receipt #${editingSale.receiptNumber} updated. Stock recalculated.`,
       });
       setEditingSale(null);
       setEditItems([]);
@@ -372,8 +380,8 @@ export const AdminSales: React.FC = () => {
         </div>
       </div>
 
-      {/* Pending Edit Requests Section */}
-      {pendingRequests.length > 0 && (
+      {/* Pending Edit Requests Section - Only for admins or users with canEditSales */}
+      {canEditSale && pendingRequests.length > 0 && (
         <div className="mb-5 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-bold text-amber-300 flex items-center gap-2">
@@ -408,22 +416,24 @@ export const AdminSales: React.FC = () => {
                     {request.originalValues.items.length} → {request.newValues.items.length} vitu
                   </div>
                 </div>
-                <div className="flex gap-2 ml-4">
-                  <button
-                    onClick={() => handleReviewRequest(request, 'APPROVE')}
-                    className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition"
-                  >
-                    <Check className="w-3 h-3 inline mr-1" />
-                    Kubali
-                  </button>
-                  <button
-                    onClick={() => handleReviewRequest(request, 'REJECT')}
-                    className="px-3 py-1.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition"
-                  >
-                    <X className="w-3 h-3 inline mr-1" />
-                    Kataa
-                  </button>
-                </div>
+                {isAdmin && (
+                  <div className="flex gap-2 ml-4">
+                    <button
+                      onClick={() => handleReviewRequest(request, 'APPROVE')}
+                      className="px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold transition"
+                    >
+                      <Check className="w-3 h-3 inline mr-1" />
+                      Kubali
+                    </button>
+                    <button
+                      onClick={() => handleReviewRequest(request, 'REJECT')}
+                      className="px-3 py-1.5 rounded bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition"
+                    >
+                      <X className="w-3 h-3 inline mr-1" />
+                      Kataa
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           ))}
@@ -612,22 +622,26 @@ export const AdminSales: React.FC = () => {
                         </button>
                         {!isVoided && (
                           <>
-                            <button
-                              onClick={() => openEditSale(sale)}
-                              className="px-2 py-1 rounded bg-blue-500/15 hover:bg-blue-600 hover:text-white text-blue-300 text-[11px] font-semibold border border-blue-500/30 transition"
-                            >
-                              <Pencil className="w-3 h-3 inline mr-0.5" />
-                              Hariri
-                            </button>
-                            <button
-                              onClick={() => {
-                                setVoidingSale(sale);
-                                setVoidReason('');
-                              }}
-                              className="px-2 py-1 rounded bg-rose-500/15 hover:bg-rose-600 hover:text-white text-rose-300 text-[11px] font-semibold border border-rose-500/30 transition"
-                            >
-                              Futa
-                            </button>
+                            {canEditSale && (
+                              <button
+                                onClick={() => openEditSale(sale)}
+                                className="px-2 py-1 rounded bg-blue-500/15 hover:bg-blue-600 hover:text-white text-blue-300 text-[11px] font-semibold border border-blue-500/30 transition"
+                              >
+                                <Pencil className="w-3 h-3 inline mr-0.5" />
+                                Hariri
+                              </button>
+                            )}
+                            {canVoidSale && (
+                              <button
+                                onClick={() => {
+                                  setVoidingSale(sale);
+                                  setVoidReason('');
+                                }}
+                                className="px-2 py-1 rounded bg-rose-500/15 hover:bg-rose-600 hover:text-white text-rose-300 text-[11px] font-semibold border border-rose-500/30 transition"
+                              >
+                                Futa
+                              </button>
+                            )}
                           </>
                         )}
                       </td>
@@ -641,7 +655,7 @@ export const AdminSales: React.FC = () => {
       </div>
 
       {/* Edit Sale Modal */}
-      {editingSale && (
+      {editingSale && canEditSale && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl animate-in fade-in zoom-in-95 my-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
@@ -761,7 +775,7 @@ export const AdminSales: React.FC = () => {
       )}
 
       {/* Void Modal */}
-      {voidingSale && (
+      {voidingSale && canVoidSale && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
