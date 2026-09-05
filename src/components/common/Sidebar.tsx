@@ -29,6 +29,7 @@ interface NavItem {
   badge?: number | string;
   badgeColor?: 'red' | 'amber' | 'blue';
   requiresPermission?: keyof import('../../types').SellerPermissions;
+  requiresAnyPermission?: (keyof import('../../types').SellerPermissions)[];
 }
 
 export const Sidebar: React.FC = () => {
@@ -42,6 +43,12 @@ export const Sidebar: React.FC = () => {
   const hasPermission = (perm: keyof import('../../types').SellerPermissions): boolean => {
     if (isAdmin) return true;
     return !!sellerPermissions[perm];
+  };
+
+  // Check if seller has ANY of the given permissions
+  const hasAnyPermission = (perms: (keyof import('../../types').SellerPermissions)[]): boolean => {
+    if (isAdmin) return true;
+    return perms.some(perm => !!sellerPermissions[perm]);
   };
 
   // Count low-stock items
@@ -61,7 +68,7 @@ export const Sidebar: React.FC = () => {
     { id: 'new_sale', label: 'New Sale (POS)', icon: ShoppingCart },
     { id: 'products', label: 'Products', icon: Package, badge: lowStockCount > 0 ? lowStockCount : undefined },
     
-    // Purchases - show if seller has permission OR always show for basic stock-in
+    // Purchases - always show (sellers can always view/record stock-in)
     { id: 'purchases', label: 'Purchases & Stock In', icon: Truck },
     
     { id: 'my_sales', label: 'My Sales', icon: History },
@@ -70,9 +77,12 @@ export const Sidebar: React.FC = () => {
     { id: 'receipts', label: 'Receipts', icon: Receipt },
     
     // Permission-gated items
+    { id: 'sales', label: 'Sales History', icon: History, requiresAnyPermission: ['canEditSales', 'canDeleteSales'] },
     { id: 'inventory', label: 'Inventory Management', icon: Boxes, requiresPermission: 'canManageInventory' },
-    { id: 'expenses', label: 'Expenses', icon: DollarSign, requiresPermission: 'canViewExpenses' },
+    { id: 'expenses', label: 'Expenses', icon: DollarSign, requiresAnyPermission: ['canViewExpenses', 'canRecordExpenses'] },
     { id: 'reports', label: 'Reports', icon: BarChart3, requiresPermission: 'canViewReports' },
+    { id: 'shops', label: 'Shops & Units', icon: Store, requiresPermission: 'canManageShops' },
+    { id: 'sellers', label: 'Sellers', icon: Users, requiresPermission: 'canManageSellers' },
     
     { id: 'settings', label: 'Settings', icon: Settings },
   ];
@@ -98,6 +108,9 @@ export const Sidebar: React.FC = () => {
   const items = (isSeller ? sellerNav : adminNav).filter(item => {
     if (item.requiresPermission) {
       return hasPermission(item.requiresPermission);
+    }
+    if (item.requiresAnyPermission) {
+      return hasAnyPermission(item.requiresAnyPermission);
     }
     return true;
   });
