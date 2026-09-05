@@ -1,4 +1,4 @@
-// functions/api/sync/pull.ts (CONFIRMED WITH SALE ITEMS)
+// functions/api/sync/pull.ts
 export async function onRequestOptions() {
   return new Response(null, {
     headers: {
@@ -21,7 +21,8 @@ export async function onRequestGet(context: any) {
     const shopsResult = await env.DB.prepare('SELECT * FROM shops WHERE updated_at > ?').bind(since).all();
     state.shops = shopsResult.results;
 
-    const usersResult = await env.DB.prepare('SELECT * FROM users WHERE updated_at > ?').bind(since).all();
+    // FIX: Always return ALL users (permissions may change without updated_at)
+    const usersResult = await env.DB.prepare('SELECT * FROM users').all();
     state.users = usersResult.results;
 
     const categoriesResult = await env.DB.prepare('SELECT * FROM categories WHERE updated_at > ?').bind(since).all();
@@ -33,7 +34,6 @@ export async function onRequestGet(context: any) {
     const salesResult = await env.DB.prepare('SELECT * FROM sales WHERE created_at > ?').bind(since).all();
     state.sales = salesResult.results;
 
-    // Get sale items - THIS IS CRITICAL
     const saleItemsResult = await env.DB.prepare(`
       SELECT si.* FROM sale_items si
       JOIN sales s ON si.sale_id = s.id
@@ -44,7 +44,6 @@ export async function onRequestGet(context: any) {
     const purchasesResult = await env.DB.prepare('SELECT * FROM purchases WHERE created_at > ?').bind(since).all();
     state.purchases = purchasesResult.results;
 
-    // Get purchase items
     const purchaseItemsResult = await env.DB.prepare(`
       SELECT pi.* FROM purchase_items pi
       JOIN purchases p ON pi.purchase_id = p.id
