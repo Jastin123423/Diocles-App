@@ -54,8 +54,21 @@ export const AdminReports: React.FC = () => {
     return { from: customStartDate || undefined, to: customEndDate || undefined };
   }, [reportPeriod, customStartDate, customEndDate]);
 
+  // FIX: Add fallback for summary to prevent blank page
   const summary = useMemo(() => {
-    return ReportService.getFinancialSummary(dateRange, currentUser);
+    const result = ReportService.getFinancialSummary(dateRange, currentUser);
+    return result || {
+      totalGrossSales: 0,
+      totalCostOfGoods: 0,
+      totalGrossProfit: 0,
+      totalExpenses: 0,
+      netProfit: 0,
+      profitMarginPercent: 0,
+      netMarginPercent: 0,
+      shopSalesBreakdown: [],
+      topProducts: [],
+      sellerSales: [],
+    };
   }, [dateRange, currentUser, dbState]);
 
   // Filter products
@@ -155,19 +168,19 @@ export const AdminReports: React.FC = () => {
         <div class="summary-grid">
           <div class="summary-card gross">
             <div class="label">Gross Revenue</div>
-            <div class="value">${settings.currencySymbol} ${summary.totalGrossSales.toLocaleString()}</div>
+            <div class="value">${settings.currencySymbol} ${(summary.totalGrossSales || 0).toLocaleString()}</div>
           </div>
           <div class="summary-card profit">
             <div class="label">Gross Profit</div>
-            <div class="value">${settings.currencySymbol} ${summary.totalGrossProfit.toLocaleString()}</div>
+            <div class="value">${settings.currencySymbol} ${(summary.totalGrossProfit || 0).toLocaleString()}</div>
           </div>
           <div class="summary-card expenses">
             <div class="label">Total Expenses</div>
-            <div class="value">${settings.currencySymbol} ${summary.totalExpenses.toLocaleString()}</div>
+            <div class="value">${settings.currencySymbol} ${(summary.totalExpenses || 0).toLocaleString()}</div>
           </div>
           <div class="summary-card net">
             <div class="label">Net Profit</div>
-            <div class="value">${settings.currencySymbol} ${summary.netProfit.toLocaleString()}</div>
+            <div class="value">${settings.currencySymbol} ${(summary.netProfit || 0).toLocaleString()}</div>
           </div>
         </div>
 
@@ -176,11 +189,11 @@ export const AdminReports: React.FC = () => {
           <div class="section-title">📊 Income Statement Summary</div>
           <table>
             <tbody>
-              <tr><td><strong>Gross Revenue (Completed Sales)</strong></td><td class="amount">${settings.currencySymbol} ${summary.totalGrossSales.toLocaleString()}</td></tr>
-              <tr><td>Less: Cost of Goods Sold (COGS)</td><td class="amount negative">-${settings.currencySymbol} ${summary.totalCostOfGoods.toLocaleString()}</td></tr>
-              <tr><td><strong>Gross Operating Profit</strong></td><td class="amount positive">${settings.currencySymbol} ${summary.totalGrossProfit.toLocaleString()} (${summary.profitMarginPercent}%)</td></tr>
-              <tr><td>Less: Operating Overhead Expenses</td><td class="amount negative">-${settings.currencySymbol} ${summary.totalExpenses.toLocaleString()}</td></tr>
-              <tr style="background:#f0fdf4; font-size:14px;"><td><strong>NET PROFIT / (LOSS)</strong></td><td class="amount ${summary.netProfit >= 0 ? 'positive' : 'negative'}">${settings.currencySymbol} ${summary.netProfit.toLocaleString()} (${summary.netMarginPercent}%)</td></tr>
+              <tr><td><strong>Gross Revenue (Completed Sales)</strong></td><td class="amount">${settings.currencySymbol} ${(summary.totalGrossSales || 0).toLocaleString()}</td></tr>
+              <tr><td>Less: Cost of Goods Sold (COGS)</td><td class="amount negative">-${settings.currencySymbol} ${(summary.totalCostOfGoods || 0).toLocaleString()}</td></tr>
+              <tr><td><strong>Gross Operating Profit</strong></td><td class="amount positive">${settings.currencySymbol} ${(summary.totalGrossProfit || 0).toLocaleString()} (${summary.profitMarginPercent || 0}%)</td></tr>
+              <tr><td>Less: Operating Overhead Expenses</td><td class="amount negative">-${settings.currencySymbol} ${(summary.totalExpenses || 0).toLocaleString()}</td></tr>
+              <tr style="background:#f0fdf4; font-size:14px;"><td><strong>NET PROFIT / (LOSS)</strong></td><td class="amount ${(summary.netProfit || 0) >= 0 ? 'positive' : 'negative'}">${settings.currencySymbol} ${(summary.netProfit || 0).toLocaleString()} (${summary.netMarginPercent || 0}%)</td></tr>
             </tbody>
           </table>
         </div>
@@ -295,11 +308,11 @@ export const AdminReports: React.FC = () => {
     let csv = `Financial Report - ${selectedShopName}\n`;
     csv += `Period: ${dateRange.from || 'Beginning'} to ${dateRange.to || 'Present'}\n\n`;
     csv += `SUMMARY\n`;
-    csv += `Gross Revenue,${summary.totalGrossSales}\n`;
-    csv += `Cost of Goods,${summary.totalCostOfGoods}\n`;
-    csv += `Gross Profit,${summary.totalGrossProfit}\n`;
-    csv += `Expenses,${summary.totalExpenses}\n`;
-    csv += `Net Profit,${summary.netProfit}\n\n`;
+    csv += `Gross Revenue,${summary.totalGrossSales || 0}\n`;
+    csv += `Cost of Goods,${summary.totalCostOfGoods || 0}\n`;
+    csv += `Gross Profit,${summary.totalGrossProfit || 0}\n`;
+    csv += `Expenses,${summary.totalExpenses || 0}\n`;
+    csv += `Net Profit,${summary.netProfit || 0}\n\n`;
     
     csv += `SHOP PERFORMANCE\n`;
     csv += `Shop,Sales Count,Total Sales,Gross Profit,Expenses,Net\n`;
@@ -411,32 +424,32 @@ export const AdminReports: React.FC = () => {
           <div className="space-y-3 text-xs">
             <div className="flex justify-between py-2 border-b border-slate-800/80">
               <span className="text-slate-300 font-medium">Gross Revenue</span>
-              <span className="font-mono font-bold text-white text-sm">{formatCurrency(summary.totalGrossSales, settings.currencySymbol)}</span>
+              <span className="font-mono font-bold text-white text-sm">{formatCurrency(summary.totalGrossSales || 0, settings.currencySymbol)}</span>
             </div>
             <div className="flex justify-between py-2 border-b border-slate-800/80 text-slate-400">
               <span>Less: COGS</span>
-              <span className="font-mono text-rose-400">-{formatCurrency(summary.totalCostOfGoods, settings.currencySymbol)}</span>
+              <span className="font-mono text-rose-400">-{formatCurrency(summary.totalCostOfGoods || 0, settings.currencySymbol)}</span>
             </div>
             <div className="flex justify-between py-2.5 bg-slate-950/80 px-3 rounded-lg border border-slate-800">
               <div>
                 <span className="font-bold text-white">Gross Profit</span>
-                <span className="text-[10px] text-emerald-400 block font-mono">{summary.profitMarginPercent}% Margin</span>
+                <span className="text-[10px] text-emerald-400 block font-mono">{summary.profitMarginPercent || 0}% Margin</span>
               </div>
-              <span className="font-mono font-bold text-emerald-400 text-base">{formatCurrency(summary.totalGrossProfit, settings.currencySymbol)}</span>
+              <span className="font-mono font-bold text-emerald-400 text-base">{formatCurrency(summary.totalGrossProfit || 0, settings.currencySymbol)}</span>
             </div>
           </div>
           <div className="space-y-3 text-xs">
             <div className="flex justify-between py-2 border-b border-slate-800/80 text-slate-400">
               <span>Less: Expenses</span>
-              <span className="font-mono text-rose-400">-{formatCurrency(summary.totalExpenses, settings.currencySymbol)}</span>
+              <span className="font-mono text-rose-400">-{formatCurrency(summary.totalExpenses || 0, settings.currencySymbol)}</span>
             </div>
-            <div className={`flex justify-between py-2.5 px-3 rounded-lg border ${summary.netProfit >= 0 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-rose-500/10 border-rose-500/30'}`}>
+            <div className={`flex justify-between py-2.5 px-3 rounded-lg border ${(summary.netProfit || 0) >= 0 ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-rose-500/10 border-rose-500/30'}`}>
               <div>
                 <span className="font-bold text-white">NET PROFIT</span>
-                <span className="text-[10px] text-slate-300 block font-mono">{summary.netMarginPercent}% Net Return</span>
+                <span className="text-[10px] text-slate-300 block font-mono">{summary.netMarginPercent || 0}% Net Return</span>
               </div>
-              <span className={`font-mono font-extrabold text-base ${summary.netProfit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                {formatCurrency(summary.netProfit, settings.currencySymbol)}
+              <span className={`font-mono font-extrabold text-base ${(summary.netProfit || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {formatCurrency(summary.netProfit || 0, settings.currencySymbol)}
               </span>
             </div>
           </div>
