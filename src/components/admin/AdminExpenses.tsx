@@ -43,7 +43,11 @@ export const AdminExpenses: React.FC = () => {
   const [notes, setNotes] = useState('');
   const [formError, setFormError] = useState('');
 
-  if (!currentUser || currentUser.role !== 'ADMIN') return null;
+  // Permission check: Admin OR Seller with canViewExpenses/canRecordExpenses
+  if (!currentUser) return null;
+  if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canViewExpenses && !currentUser.permissions?.canRecordExpenses) return null;
+
+  const canRecordExpense = currentUser.role === 'ADMIN' || currentUser.permissions?.canRecordExpenses;
 
   const settings = dbState.settings;
   const expenses = ExpenseService.getExpenses(
@@ -76,7 +80,6 @@ export const AdminExpenses: React.FC = () => {
       return;
     }
 
-    // Parse formatted amount string back to number
     const amt = parsePriceInput(amount);
     if (isNaN(amt) || amt <= 0) {
       setFormError('Please enter a valid expense amount.');
@@ -118,14 +121,16 @@ export const AdminExpenses: React.FC = () => {
           </p>
         </div>
 
-        <button
-          id="record-expense-btn"
-          onClick={openAddModal}
-          className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-lg transition"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Record Expense</span>
-        </button>
+        {canRecordExpense && (
+          <button
+            id="record-expense-btn"
+            onClick={openAddModal}
+            className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-xs shadow-lg transition"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Record Expense</span>
+          </button>
+        )}
       </div>
 
       {/* Summary KPI Row */}
@@ -154,11 +159,15 @@ export const AdminExpenses: React.FC = () => {
 
         <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl">
           <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider">Data Protection</span>
+            <span className="text-xs font-semibold uppercase tracking-wider">Access Level</span>
             <DollarSign className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="text-sm font-bold text-amber-300">Protected From Sellers</div>
-          <p className="text-[11px] text-slate-400 mt-1">Sellers cannot view overhead expenses</p>
+          <div className="text-sm font-bold text-amber-300">
+            {canRecordExpense ? 'Can View & Record' : 'View Only'}
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1">
+            {currentUser.role === 'ADMIN' ? 'Full admin access' : 'Seller permission granted'}
+          </p>
         </div>
       </div>
 
@@ -247,7 +256,7 @@ export const AdminExpenses: React.FC = () => {
       </div>
 
       {/* Modal: Record Expense */}
-      {isModalOpen && (
+      {isModalOpen && canRecordExpense && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl animate-in fade-in zoom-in-95">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
