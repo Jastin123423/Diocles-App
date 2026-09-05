@@ -46,6 +46,10 @@ export const AdminShops: React.FC = () => {
     status: 'ACTIVE' as ShopStatus,
   });
 
+  // Permission check: Admin OR Seller with canManageShops
+  if (!currentUser) return null;
+  if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canManageShops) return null;
+
   const shops = useMemo(() => {
     return ShopService.getShops({
       status: statusFilter,
