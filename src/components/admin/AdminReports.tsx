@@ -30,7 +30,9 @@ export const AdminReports: React.FC = () => {
   const [sellerSearch, setSellerSearch] = useState('');
   const [isPrinting, setIsPrinting] = useState(false);
 
-  if (!currentUser || currentUser.role !== 'ADMIN') return null;
+  // Permission check: Admin OR Seller with canViewReports
+  if (!currentUser) return null;
+  if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canViewReports) return null;
 
   const settings = dbState.settings;
   const shops = dbState.shops || [];
