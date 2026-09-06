@@ -1,6 +1,6 @@
-// src/services/authService.ts (UPDATED WITH REMEMBER ME)
+// src/services/authService.ts (UPDATED WITH REMEMBER ME & PERMISSIONS)
 import { db } from '../db/storage';
-import { User, UserRole } from '../types';
+import { User, UserRole, SellerPermissions } from '../types';
 import { hashPassword, verifyPassword, generateUUID } from '../utils/crypto';
 import { CloudflareApi } from './cloudflareApi';
 
@@ -8,6 +8,22 @@ const AUTH_STORAGE_KEY = 'omnibiz_active_session_v1';
 const REMEMBER_KEY = 'omnibiz_remember_me';
 
 export class AuthService {
+  /**
+   * Helper to parse permissions from various sources (string or object)
+   */
+  private static parsePermissions(permissions: any): SellerPermissions {
+    if (!permissions) return {};
+    try {
+      if (typeof permissions === 'string') {
+        return JSON.parse(permissions);
+      }
+      return permissions;
+    } catch (e) {
+      console.warn('Failed to parse permissions:', e);
+      return {};
+    }
+  }
+
   public static async login(
     username: string,
     plainPassword: string,
@@ -24,7 +40,9 @@ export class AuthService {
         if (online) {
           const cloudResult = await CloudflareApi.login(username, plainPassword);
           if (cloudResult.success && cloudResult.user) {
-            // Sync cloud user to local
+            // Parse permissions from cloud response
+            const parsedPermissions = AuthService.parsePermissions(cloudResult.user.permissions);
+            
             const cloudUser: User = {
               id: cloudResult.user.id,
               username: cloudResult.user.username,
@@ -35,8 +53,9 @@ export class AuthService {
               status: cloudResult.user.status || 'ACTIVE',
               assignedShopIds: cloudResult.user.assignedShopIds || [],
               avatarUrl: cloudResult.user.avatarUrl || cloudResult.user.avatar_url || null,
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
+              permissions: parsedPermissions,
+              createdAt: cloudResult.user.created_at || new Date().toISOString(),
+              updatedAt: cloudResult.user.updated_at || new Date().toISOString(),
             };
             
             const updatedUsers = [...db.getUsers().filter(u => u.id !== cloudUser.id), cloudUser];
@@ -58,6 +77,8 @@ export class AuthService {
               entityId: cloudUser.id,
               timestamp: new Date().toISOString(),
             });
+            
+            console.log('[Login] Cloud user:', { id: cloudUser.id, role: cloudUser.role, permissions: cloudUser.permissions });
             
             return { success: true, user: cloudUser };
           }
@@ -100,6 +121,12 @@ export class AuthService {
       }
     }
 
+    // Ensure permissions are parsed correctly from local user
+    if (user.permissions && typeof user.permissions === 'string') {
+      user.permissions = AuthService.parsePermissions(user.permissions);
+      db.saveUsers(users);
+    }
+
     // Persist session locally
     AuthService.setActiveUser(user);
 
@@ -114,6 +141,8 @@ export class AuthService {
       entityId: user.id,
       timestamp: new Date().toISOString(),
     });
+
+    console.log('[Login] Local user:', { id: user.id, name: user.name, role: user.role, permissions: user.permissions });
 
     // Try cloud login in background (non-blocking)
     CloudflareApi.login(username, plainPassword)
@@ -135,10 +164,14 @@ export class AuthService {
       const stored = localStorage.getItem(AUTH_STORAGE_KEY);
       if (!stored) return null;
       const parsed = JSON.parse(stored) as User;
-      // Refresh user from database to ensure up-to-date color/status
+      // Refresh user from database to ensure up-to-date color/status/permissions
       const users = db.getUsers();
       const current = users.find(u => u.id === parsed.id);
       if (current && current.status === 'ACTIVE') {
+        // Ensure permissions are parsed
+        if (current.permissions && typeof current.permissions === 'string') {
+          current.permissions = AuthService.parsePermissions(current.permissions);
+        }
         return current;
       }
       return null;
@@ -175,6 +208,10 @@ export class AuthService {
       const users = db.getUsers();
       const user = users.find(u => u.id === userId);
       if (user && user.status === 'ACTIVE') {
+        // Ensure permissions are parsed
+        if (user.permissions && typeof user.permissions === 'string') {
+          user.permissions = AuthService.parsePermissions(user.permissions);
+        }
         AuthService.setActiveUser(user);
         return user;
       }
@@ -304,7 +341,7 @@ export class AuthService {
     // Update active session
     AuthService.setActiveUser(targetUser);
 
-    // Sync to cloud
+    // Sync to cloud - INCLUDE PERMISSIONS
     db.enqueueSync({
       id: generateUUID(),
       operation: 'UPDATE_SELLER',
@@ -320,6 +357,7 @@ export class AuthService {
         status: targetUser.status,
         assignedShopIds: targetUser.assignedShopIds,
         avatarUrl: targetUser.avatarUrl || null,
+        permissions: targetUser.permissions || {},
         createdAt: targetUser.createdAt,
         updatedAt: targetUser.updatedAt,
       },
