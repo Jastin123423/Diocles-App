@@ -2,7 +2,7 @@ export async function onRequestOptions() {
   return new Response(null, {
     headers: {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS, GET',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Device-ID',
       'Access-Control-Max-Age': '86400',
     },
@@ -11,8 +11,8 @@ export async function onRequestOptions() {
 
 export async function onRequestGet() {
   return new Response(JSON.stringify({ 
+    success: true,
     message: 'Sync push endpoint. Use POST method.',
-    example: { deviceId: 'test', operations: [] }
   }), {
     headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
   });
@@ -20,6 +20,18 @@ export async function onRequestGet() {
 
 export async function onRequestPost(context: any) {
   const { request, env } = context;
+  
+  // Handle CORS preflight
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Device-ID',
+        'Access-Control-Max-Age': '86400',
+      },
+    });
+  }
   
   try {
     const { deviceId, operations } = await request.json();
@@ -158,7 +170,6 @@ async function processOperation(db: any, op: any) {
 }
 
 async function deleteShop(db: any, payload: any) {
-  // Delete related records first (foreign key cascade)
   await db.prepare('DELETE FROM product_images WHERE product_id IN (SELECT id FROM products WHERE shop_id = ?)').bind(payload.id).run();
   await db.prepare('DELETE FROM inventory_movements WHERE shop_id = ?').bind(payload.id).run();
   await db.prepare('DELETE FROM purchase_items WHERE purchase_id IN (SELECT id FROM purchases WHERE shop_id = ?)').bind(payload.id).run();
@@ -184,9 +195,7 @@ async function deleteSeller(db: any, payload: any) {
 }
 
 async function deleteDebt(db: any, payload: any) {
-  // Delete related payments first
   await db.prepare('DELETE FROM debt_payments WHERE debt_id = ?').bind(payload.id).run();
-  // Delete the debt
   await db.prepare('DELETE FROM debts WHERE id = ?').bind(payload.id).run();
 }
 
@@ -243,7 +252,6 @@ async function upsertProduct(db: any, product: any) {
     product.createdAt || new Date().toISOString(), product.updatedAt || new Date().toISOString()
   ).run();
 
-  // Save product images to product_images table
   if (product.images && Array.isArray(product.images) && product.images.length > 0) {
     for (let i = 0; i < product.images.length; i++) {
       const img = product.images[i];
@@ -333,7 +341,6 @@ async function createSale(db: any, sale: any) {
       item.purchasePrice || 0, item.quantity || 0, item.discount || 0, item.total || 0
     ).run();
 
-    // Decrease product stock after sale
     await db.prepare(`
       UPDATE products 
       SET current_stock = current_stock - ?,
@@ -348,7 +355,6 @@ async function createSale(db: any, sale: any) {
 }
 
 async function updateSale(db: any, sale: any) {
-  // First, reverse old stock (add back quantities)
   const oldSaleItems = await db.prepare(
     'SELECT product_id, quantity FROM sale_items WHERE sale_id = ?'
   ).bind(sale.id).all();
@@ -368,10 +374,8 @@ async function updateSale(db: any, sale: any) {
     }
   }
 
-  // Delete old sale items
   await db.prepare('DELETE FROM sale_items WHERE sale_id = ?').bind(sale.id).run();
 
-  // Update sale metadata
   await db.prepare(`
     UPDATE sales SET
       subtotal = ?,
@@ -395,7 +399,6 @@ async function updateSale(db: any, sale: any) {
     sale.id
   ).run();
 
-  // Insert new sale items and decrease stock
   for (const item of (sale.items || [])) {
     await db.prepare(`
       INSERT INTO sale_items (
@@ -409,7 +412,6 @@ async function updateSale(db: any, sale: any) {
       item.purchasePrice || 0, item.quantity || 0, item.discount || 0, item.total || 0
     ).run();
 
-    // Decrease product stock
     await db.prepare(`
       UPDATE products 
       SET current_stock = current_stock - ?,
@@ -426,12 +428,10 @@ async function updateSale(db: any, sale: any) {
 async function voidSale(db: any, payload: any) {
   const saleId = payload.saleId || payload.id;
   
-  // Get sale items to restore stock
   const saleItems = await db.prepare(
     'SELECT product_id, quantity FROM sale_items WHERE sale_id = ?'
   ).bind(saleId).all();
   
-  // Restore stock for each item
   if (saleItems.results) {
     for (const item of saleItems.results) {
       await db.prepare(`
@@ -447,7 +447,6 @@ async function voidSale(db: any, payload: any) {
     }
   }
   
-  // Void the sale
   await db.prepare(`
     UPDATE sales SET status = 'VOIDED', void_reason = ?, voided_at = ?, voided_by = ?
     WHERE id = ?
@@ -475,7 +474,6 @@ async function createPurchase(db: any, purchase: any) {
   ).run();
 
   for (const item of (purchase.items || [])) {
-    // Insert purchase item record
     await db.prepare(`
       INSERT INTO purchase_items (id, purchase_id, product_id, product_name, quantity, unit_cost, total)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -485,7 +483,6 @@ async function createPurchase(db: any, purchase: any) {
       item.quantity || 0, item.unitCost || 0, item.total || 0
     ).run();
 
-    // Get current stock and price to calculate weighted average
     const product = await db.prepare(
       'SELECT current_stock, purchase_price FROM products WHERE id = ?'
     ).bind(item.productId).first();
@@ -502,7 +499,6 @@ async function createPurchase(db: any, purchase: any) {
         ? (currentTotalCost + newTotalCost) / newTotalStock 
         : newUnitCost;
 
-      // Update product with average cost
       await db.prepare(`
         UPDATE products 
         SET current_stock = ?, 
@@ -516,7 +512,6 @@ async function createPurchase(db: any, purchase: any) {
         item.productId
       ).run();
 
-      // Record inventory movement for stock increase
       await db.prepare(`
         INSERT INTO inventory_movements (
           id, shop_id, shop_name, product_id, product_name,
@@ -547,7 +542,6 @@ async function createPurchase(db: any, purchase: any) {
 }
 
 async function updatePurchase(db: any, purchase: any) {
-  // First, reverse old stock
   const oldPurchase = await db.prepare(
     'SELECT * FROM purchase_items WHERE purchase_id = ?'
   ).bind(purchase.id).all();
@@ -564,46 +558,11 @@ async function updatePurchase(db: any, purchase: any) {
         new Date().toISOString(), 
         oldItem.product_id
       ).run();
-
-      // Record inventory movement for stock reversal
-      const product = await db.prepare(
-        'SELECT current_stock FROM products WHERE id = ?'
-      ).bind(oldItem.product_id).first();
-      
-      if (product) {
-        await db.prepare(`
-          INSERT INTO inventory_movements (
-            id, shop_id, shop_name, product_id, product_name,
-            previous_qty, change_qty, new_qty, type, reason, cost_value,
-            reference_id, user_id, user_name, created_at
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(id) DO NOTHING
-        `).bind(
-          crypto.randomUUID(),
-          purchase.shopId,
-          purchase.shopName || null,
-          oldItem.product_id,
-          oldItem.product_name,
-          Number(product.current_stock) + Number(oldItem.quantity || 0),
-          -Number(oldItem.quantity || 0),
-          Number(product.current_stock),
-          'PURCHASE_EDIT',
-          `Purchase edit - reversed old quantity`,
-          Number(oldItem.unit_cost || 0),
-          purchase.id,
-          purchase.createdByUserId,
-          purchase.createdByName,
-          new Date().toISOString()
-        ).run();
-      }
     }
   }
 
-  // Delete old purchase items
   await db.prepare('DELETE FROM purchase_items WHERE purchase_id = ?').bind(purchase.id).run();
 
-  // Update purchase metadata
   await db.prepare(`
     UPDATE purchases SET
       supplier_name = ?,
@@ -623,9 +582,7 @@ async function updatePurchase(db: any, purchase: any) {
     purchase.id
   ).run();
 
-  // Insert new items and update stock
   for (const item of (purchase.items || [])) {
-    // Insert new purchase item
     await db.prepare(`
       INSERT INTO purchase_items (id, purchase_id, product_id, product_name, quantity, unit_cost, total)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -639,7 +596,6 @@ async function updatePurchase(db: any, purchase: any) {
       item.total || 0
     ).run();
 
-    // Get current product info for average cost calculation
     const product = await db.prepare(
       'SELECT current_stock, purchase_price FROM products WHERE id = ?'
     ).bind(item.productId).first();
@@ -656,7 +612,6 @@ async function updatePurchase(db: any, purchase: any) {
         ? (currentTotalCost + newTotalCost) / newTotalStock 
         : newUnitCost;
 
-      // Update product with new stock and average cost
       await db.prepare(`
         UPDATE products 
         SET current_stock = ?,
@@ -668,33 +623,6 @@ async function updatePurchase(db: any, purchase: any) {
         Number(newAveragePrice.toFixed(2)),
         new Date().toISOString(),
         item.productId
-      ).run();
-
-      // Record inventory movement for new stock
-      await db.prepare(`
-        INSERT INTO inventory_movements (
-          id, shop_id, shop_name, product_id, product_name,
-          previous_qty, change_qty, new_qty, type, reason, cost_value,
-          reference_id, user_id, user_name, created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(id) DO NOTHING
-      `).bind(
-        crypto.randomUUID(),
-        purchase.shopId,
-        purchase.shopName || null,
-        item.productId,
-        item.productName,
-        currentStock,
-        newPurchaseQty,
-        newTotalStock,
-        'PURCHASE_EDIT',
-        `Purchase edit - applied corrected quantity`,
-        newUnitCost,
-        purchase.id,
-        purchase.createdByUserId,
-        purchase.createdByName,
-        new Date().toISOString()
       ).run();
     }
   }
