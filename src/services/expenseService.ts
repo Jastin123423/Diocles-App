@@ -5,7 +5,7 @@ import { generateUUID } from '../utils/crypto';
 export class ExpenseService {
   /**
    * Record operational expense (Shop-specific or General Company).
-   * Admin only. Sellers must never access.
+   * Admin OR Seller with canRecordExpenses permission.
    */
   public static recordExpense(
     params: {
@@ -22,8 +22,9 @@ export class ExpenseService {
     },
     currentUser: User
   ): { success: boolean; expense?: Expense; error?: string } {
-    if (currentUser.role !== 'ADMIN') {
-      return { success: false, error: 'Permission Denied: Only Admin can record expenses.' };
+    // FIX: Allow Admin OR Seller with canRecordExpenses permission
+    if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canRecordExpenses) {
+      return { success: false, error: 'Permission Denied: You do not have permission to record expenses.' };
     }
 
     const desc = params.title || params.description;
@@ -111,6 +112,10 @@ export class ExpenseService {
     return ExpenseService.recordExpense(params, currentUser);
   }
 
+  /**
+   * Get expenses - Admin sees all, Seller with canViewExpenses sees all, 
+   * Seller with canRecordExpenses sees all (they need to view what they record).
+   */
   public static getExpenses(
     filter?: {
       shopId?: string;
@@ -121,8 +126,13 @@ export class ExpenseService {
     },
     currentUser?: User
   ): Expense[] {
-    if (currentUser && currentUser.role !== 'ADMIN') {
-      return []; // Shield expenses from sellers
+    // FIX: Allow Admin OR Seller with canViewExpenses/canRecordExpenses to view expenses
+    if (currentUser) {
+      if (currentUser.role !== 'ADMIN' && 
+          !currentUser.permissions?.canViewExpenses && 
+          !currentUser.permissions?.canRecordExpenses) {
+        return []; // No permission to view expenses
+      }
     }
 
     let list = db.getExpenses();
