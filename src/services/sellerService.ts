@@ -30,7 +30,7 @@ export class SellerService {
   }
 
   /**
-   * Admin creates a new seller with assigned shops and permissions.
+   * Admin or Seller with canManageSellers permission creates a new seller.
    */
   public static async createSeller(
     params: {
@@ -44,7 +44,8 @@ export class SellerService {
     },
     currentUser: User
   ): Promise<{ success: boolean; seller?: User; error?: string }> {
-    if (currentUser.role !== 'ADMIN') {
+    // FIX: Allow Admin OR Seller with canManageSellers permission
+    if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canManageSellers) {
       return { success: false, error: 'Permission Denied: Only Admin can create seller accounts.' };
     }
 
@@ -115,7 +116,7 @@ export class SellerService {
   }
 
   /**
-   * Admin updates a seller (name, color, status, assignedShopIds, permissions).
+   * Admin or Seller with canManageSellers permission updates a seller.
    */
   public static updateSeller(
     sellerId: string,
@@ -128,7 +129,8 @@ export class SellerService {
     },
     currentUser: User
   ): { success: boolean; seller?: User; error?: string } {
-    if (currentUser.role !== 'ADMIN') {
+    // FIX: Allow Admin OR Seller with canManageSellers permission
+    if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canManageSellers) {
       return { success: false, error: 'Permission Denied: Only Admin can manage seller profiles.' };
     }
 
@@ -210,13 +212,14 @@ export class SellerService {
   }
 
   /**
-   * Admin deletes a seller permanently.
+   * Admin or Seller with canManageSellers permission deletes a seller.
    */
   public static deleteSeller(
     sellerId: string,
     currentUser: User
   ): { success: boolean; error?: string } {
-    if (currentUser.role !== 'ADMIN') {
+    // FIX: Allow Admin OR Seller with canManageSellers permission
+    if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canManageSellers) {
       return { success: false, error: 'Permission Denied: Only Admin can delete sellers.' };
     }
 
