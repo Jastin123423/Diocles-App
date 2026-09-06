@@ -39,7 +39,8 @@ export async function onRequestPost(context: any) {
         const result = await processOperation(env.DB, op);
         results.push({ id: op.id, success: true, ...result });
       } catch (error: any) {
-        errors.push({ id: op.id, error: error.message });
+        console.error('Operation error:', op.operation, error);
+        errors.push({ id: op.id, operation: op.operation, error: error.message });
       }
     }
 
@@ -53,6 +54,7 @@ export async function onRequestPost(context: any) {
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     });
   } catch (error: any) {
+    console.error('Request error:', error);
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
