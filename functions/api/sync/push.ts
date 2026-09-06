@@ -21,18 +21,6 @@ export async function onRequestGet() {
 export async function onRequestPost(context: any) {
   const { request, env } = context;
   
-  // Handle CORS preflight
-  if (request.method === 'OPTIONS') {
-    return new Response(null, {
-      headers: {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Device-ID',
-        'Access-Control-Max-Age': '86400',
-      },
-    });
-  }
-  
   try {
     const { deviceId, operations } = await request.json();
     
@@ -461,16 +449,16 @@ async function createPurchase(db: any, purchase: any) {
     INSERT INTO purchases (
       id, purchase_number, shop_id, shop_name, supplier_name, date,
       total_amount, payment_status, notes, invoice_number,
-      created_by_user_id, created_by_name, created_at, updated_at
+      created_by_user_id, created_by_name, created_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO NOTHING
   `).bind(
     purchase.id, purchase.purchaseNumber, purchase.shopId, purchase.shopName || null,
     purchase.supplierName, purchase.date || new Date().toISOString().slice(0, 10),
     purchase.totalAmount || 0, purchase.paymentStatus || 'PAID', purchase.notes || null,
     purchase.invoiceNumber || null, purchase.createdByUserId, purchase.createdByName,
-    purchase.createdAt || new Date().toISOString(), purchase.updatedAt || null
+    purchase.createdAt || new Date().toISOString()
   ).run();
 
   for (const item of (purchase.items || [])) {
@@ -569,8 +557,7 @@ async function updatePurchase(db: any, purchase: any) {
       invoice_number = ?,
       payment_status = ?,
       notes = ?,
-      total_amount = ?,
-      updated_at = ?
+      total_amount = ?
     WHERE id = ?
   `).bind(
     purchase.supplierName,
@@ -578,7 +565,6 @@ async function updatePurchase(db: any, purchase: any) {
     purchase.paymentStatus || 'PAID',
     purchase.notes || null,
     purchase.totalAmount || 0,
-    new Date().toISOString(),
     purchase.id
   ).run();
 
