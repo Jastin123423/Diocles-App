@@ -52,8 +52,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   });
   
   const isSyncingRef = useRef<boolean>(false);
-  const lastPullTimeRef = useRef<number>(0);
-  const PULL_INTERVAL = 60000; // 60 seconds between pulls
+  const isPushingRef = useRef<boolean>(false);
+  const lastPullTimeRef = useRef<number>(Date.now());
+  const PULL_INTERVAL = 900000; // 15 minutes between pulls (D1 cost optimization)
 
   const setSelectedShopId = (shopId: string) => {
     setSelectedShopIdState(shopId);
@@ -79,7 +80,113 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return (dbState.shops || []).find(s => s.id === selectedShopId) || null;
   }, [dbState.shops, selectedShopId]);
 
-  // Listen to LocalDB changes and sync React state
+  /**
+   * PUSH PENDING ITEMS TO CLOUD
+   * Called immediately after any local data change (via db.subscribe)
+   */
+  const pushPendingItems = async () => {
+    if (isPushingRef.current || isSyncingRef.current) return;
+    
+    const queue = db.getSyncQueue();
+    const pendingItems = queue.filter(item => item.status === 'PENDING');
+    
+    if (pendingItems.length === 0) return;
+    
+    isPushingRef.current = true;
+    isSyncingRef.current = true;
+    
+    try {
+      const online = await CloudflareApi.checkConnection();
+      
+      if (online) {
+        console.log(`[Sync] Pushing ${pendingItems.length} items to cloud...`);
+        
+        const operations = pendingItems.map(item => ({
+          id: item.id,
+          operation: item.operation || item.action,
+          entityType: item.entityType,
+          entityId: item.entityId,
+          payload: item.payload,
+        }));
+        
+        const pushResult = await CloudflareApi.pushSync(operations);
+        
+        if (pushResult.success) {
+          const updatedQueue = queue.map(item => {
+            if (item.status === 'PENDING') {
+              return { ...item, status: 'SYNCED' as const };
+            }
+            return item;
+          });
+          db.saveSyncQueue(updatedQueue);
+          
+          localStorage.setItem('omnibiz_last_synced_at', new Date().toISOString());
+          
+          const state = db.getState();
+          setDbState({ ...state });
+          setSyncStatus(SyncService.getSyncStatus());
+          
+          console.log(`[Sync] Successfully pushed ${pendingItems.length} items`);
+        } else {
+          console.log('[Sync] Push failed:', pushResult);
+        }
+      } else {
+        console.log('[Sync] Offline - will retry later');
+      }
+    } catch (error) {
+      console.log('[Sync] Push error:', error);
+    } finally {
+      isPushingRef.current = false;
+      isSyncingRef.current = false;
+    }
+  };
+
+  /**
+   * PULL LATEST CLOUD DATA
+   * Only called every 15 minutes (not on every db change)
+   */
+  const pullCloudData = async () => {
+    if (isSyncingRef.current) return;
+    
+    const now = Date.now();
+    const timeSinceLastPull = now - lastPullTimeRef.current;
+    
+    if (timeSinceLastPull < PULL_INTERVAL) return;
+    
+    isSyncingRef.current = true;
+    
+    try {
+      const online = await CloudflareApi.checkConnection();
+      if (!online) {
+        isSyncingRef.current = false;
+        return;
+      }
+      
+      console.log('[Sync] Pulling cloud data...');
+      
+      const pullResult = await CloudflareApi.pullSync();
+      
+      if (pullResult.success && pullResult.data) {
+        SyncService.applyCloudData(pullResult.data);
+        
+        localStorage.setItem('omnibiz_last_synced_at', new Date().toISOString());
+        
+        const state = db.getState();
+        setDbState({ ...state });
+        setSyncStatus(SyncService.getSyncStatus());
+        
+        console.log('[Sync] Pull completed');
+      }
+      
+      lastPullTimeRef.current = Date.now();
+    } catch (error) {
+      console.log('[Sync] Pull error:', error);
+    } finally {
+      isSyncingRef.current = false;
+    }
+  };
+
+  // 1. Listen to LocalDB changes and push immediately
   useEffect(() => {
     const unsubscribe = db.subscribe(() => {
       const state = db.getState();
@@ -104,85 +211,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
         }
       }
+      
+      // PUSH: Immediately push pending items when db changes
+      const pendingCount = db.getSyncQueue().filter(q => q.status === 'PENDING').length;
+      if (pendingCount > 0) {
+        pushPendingItems();
+      }
     });
 
     return () => unsubscribe();
   }, [currentUser]);
 
-  // OPTIMIZED SYNC: 
-  // - Push pending items immediately (if any)
-  // - Pull only every 60 seconds (not every 2 seconds)
+  // 2. Pull cloud data every 15 minutes
   useEffect(() => {
-    const liveSync = async () => {
-      if (isSyncingRef.current) return;
-      
-      try {
-        const online = await CloudflareApi.checkConnection();
-        
-        if (online) {
-          isSyncingRef.current = true;
-          
-          const pendingCount = SyncService.getPendingCount();
-          const now = Date.now();
-          const timeSinceLastPull = now - lastPullTimeRef.current;
-          const shouldPull = timeSinceLastPull >= PULL_INTERVAL;
-          
-          // PUSH: Always push if there are pending items
-          if (pendingCount > 0) {
-            await SyncService.processSyncQueue(currentUser || undefined);
-          }
-          
-          // PULL: Only pull every 60 seconds
-          if (shouldPull) {
-            const pullResult = await CloudflareApi.pullSync();
-            
-            if (pullResult.success && pullResult.data) {
-              SyncService.applyCloudData(pullResult.data);
-              
-              const nowISO = new Date().toISOString();
-              localStorage.setItem('omnibiz_last_synced_at', nowISO);
-              
-              const state = db.getState();
-              setDbState({ ...state });
-              setSyncStatus(SyncService.getSyncStatus());
-            }
-            
-            lastPullTimeRef.current = now;
-          }
-          
-          isSyncingRef.current = false;
-        }
-      } catch (error) {
-        console.log('[LiveSync] Error:', error);
-        isSyncingRef.current = false;
-      }
-    };
-
-    // Initial check
-    liveSync();
+    // Initial pull on login
+    pullCloudData();
     
-    // Check every 10 seconds for pending pushes
-    // But only pull every 60 seconds
-    const interval = setInterval(liveSync, 10000);
+    // Pull every 15 minutes
+    const interval = setInterval(pullCloudData, PULL_INTERVAL);
     
     return () => clearInterval(interval);
   }, [currentUser]);
 
-  // Listen for online/offline events
+  // 3. Push on reconnect
   useEffect(() => {
     const handleOnline = () => {
-      console.log('[LiveSync] Connection restored');
-      if (currentUser) {
-        SyncService.processSyncQueue(currentUser).then(() => {
-          const state = db.getState();
-          setDbState({ ...state });
-          setSyncStatus(SyncService.getSyncStatus());
-        });
-      }
+      console.log('[Sync] Connection restored - pushing pending items');
+      pushPendingItems();
+      // Also pull on reconnect if enough time has passed
+      pullCloudData();
     };
 
     const handleOffline = () => {
-      console.log('[LiveSync] Connection lost');
+      console.log('[Sync] Connection lost');
       setSyncStatus({ state: 'OFFLINE_LOCAL', pendingCount: SyncService.getPendingCount() });
     };
 
@@ -219,15 +280,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const login = (user: User) => {
-    AuthService.setActiveUser(user);
-    setCurrentUser(user);
+    // Get freshest user data from local DB (includes permissions)
+    const allUsers = db.getUsers();
+    const freshUser = allUsers.find(u => u.id === user.id) || user;
+    
+    console.log('[Login] User:', { id: freshUser.id, role: freshUser.role, permissions: freshUser.permissions });
+    
+    AuthService.setActiveUser(freshUser);
+    setCurrentUser(freshUser);
 
-    if (user.role === 'ADMIN') {
+    if (freshUser.role === 'ADMIN') {
       setActiveTab('dashboard');
     } else {
       setActiveTab('new_sale');
       const sellerShops = (dbState.shops || []).filter(
-        s => s.status === 'ACTIVE' && (user.assignedShopIds || []).includes(s.id)
+        s => s.status === 'ACTIVE' && (freshUser.assignedShopIds || []).includes(s.id)
       );
       if (sellerShops.length > 0) {
         setSelectedShopId(sellerShops[0].id);
@@ -236,12 +303,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     addToast({
       type: 'success',
-      title: `Welcome back, ${user.name}`,
-      description: `Logged in as ${user.role}`,
+      title: `Welcome back, ${freshUser.name}`,
+      description: `Logged in as ${freshUser.role}`,
     });
+    
+    // Push any pending items immediately after login
+    setTimeout(() => pushPendingItems(), 1000);
   };
 
   const logout = () => {
+    // Push pending items before logout
+    pushPendingItems();
+    
     AuthService.logout();
     setCurrentUser(null);
     setActiveTab('dashboard');
@@ -276,23 +349,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const triggerSync = async () => {
     setSyncStatus({ state: 'SYNCING', pendingCount: syncStatus.pendingCount });
     
-    const res = await SyncService.processSyncQueue(currentUser || undefined);
+    // Push pending items
+    await pushPendingItems();
+    
+    // Pull latest data
+    await pullCloudData();
     
     setSyncStatus(SyncService.getSyncStatus());
     
-    if (res.success) {
+    const pendingCount = SyncService.getPendingCount();
+    
+    if (pendingCount === 0) {
       addToast({
         type: 'success',
         title: 'Synchronization Complete',
-        description: res.processedCount > 0 
-          ? `Synced ${res.processedCount} records to cloud.` 
-          : 'All records up to date.',
+        description: 'All records up to date.',
       });
     } else {
       addToast({
         type: 'warning',
         title: 'Sync Status',
-        description: res.message || 'Sync completed.',
+        description: `${pendingCount} items still pending. Will retry automatically.`,
       });
     }
   };
@@ -314,6 +391,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     
     setDbState(db.getState());
     setSyncStatus(SyncService.getSyncStatus());
+    
+    // Push immediately
+    pushPendingItems();
   };
 
   const sellerColor = useMemo(() => {
