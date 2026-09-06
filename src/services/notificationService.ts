@@ -16,7 +16,6 @@ export class NotificationService {
 
   /**
    * Run local generation routine for automatic debt and stock reminders.
-   * Runs offline without needing any external server or API.
    */
   public static syncAutomaticNotifications(): void {
     const todayStr = this.getTodayStr();
@@ -31,7 +30,7 @@ export class NotificationService {
     // 1. Process Debts
     debts.forEach(debt => {
       if (debt.status === 'PAID' || debt.status === 'CANCELLED' || debt.status === 'ARCHIVED') {
-        return; // Stopped when paid
+        return;
       }
 
       if (!debt.dueDate) return;
@@ -45,10 +44,8 @@ export class NotificationService {
       const isPartial = (debt.paidAmount || 0) > 0;
       const amtDisplay = isPartial ? `salio la Sh ${remainingStr} (Jumla: Sh ${debt.amount.toLocaleString()})` : `Sh ${remainingStr}`;
 
-      // Find target shop name if debt is associated with a shop
       const shopName = debt.shopId ? (shops.find(s => s.id === debt.shopId)?.name || 'Duka') : undefined;
 
-      // Tomorrow upcoming payment
       if (due === tomorrowStr) {
         if (debt.type === 'WE_DEMAND') {
           const contactMsg = debt.contact ? ` Simu: ${debt.contact}.` : '';
@@ -74,7 +71,6 @@ export class NotificationService {
             });
           }
         } else {
-          // THEY_DEMAND (Wanatudai)
           const msg = `Kesho ni siku ya kulipa ${debt.debtorName} pesa ya ${desc} ${amtDisplay}.`;
           const id = `notif-debt-up-comp-${debt.id}-${todayStr}`;
           
@@ -99,7 +95,6 @@ export class NotificationService {
         }
       }
 
-      // Overdue debts
       if (due < todayStr) {
         const days = Math.max(1, DebtService.getOverdueDays(debt.dueDate, todayStr));
 
@@ -126,7 +121,6 @@ export class NotificationService {
             });
           }
         } else {
-          // THEY_DEMAND (Wanatudai)
           const msg = `Malipo ya ${desc} kwa ${debt.debtorName} (${amtDisplay}) yamechelewa. Zimepita siku ${days}.`;
           const id = `notif-debt-over-comp-${debt.id}-${todayStr}`;
 
@@ -159,7 +153,6 @@ export class NotificationService {
       const shop = shops.find(s => s.id === product.shopId);
       const shopName = shop?.name || 'Shop';
 
-      // Out of Stock
       if (product.currentStock <= 0) {
         const msg = `${product.name} zimeisha kabisa.`;
         const id = `notif-stock-out-${product.id}-${todayStr}`;
@@ -182,7 +175,6 @@ export class NotificationService {
           });
         }
       } else if (product.currentStock <= product.minStock) {
-        // Low Stock
         const msg = `${product.name} zimekaribia kuisha — zimebaki ${product.currentStock}.`;
         const id = `notif-stock-low-${product.id}-${todayStr}`;
 
@@ -206,7 +198,6 @@ export class NotificationService {
       }
     });
 
-    // Append newly generated notifications if any
     if (newNotifications.length > 0) {
       const merged = [...newNotifications, ...existingNotifications].slice(0, 300);
       db.saveNotifications(merged);
@@ -224,7 +215,6 @@ export class NotificationService {
     const shopName = targetShop?.name || 'Duka';
     const now = new Date().toISOString();
 
-    // 1. Notification for Sellers of that shop
     const sellerNotif: AppNotification = {
       id: `notif-price-seller-${product.id}-${Date.now()}`,
       type: 'PRICE_CHANGE_SELLER',
@@ -241,7 +231,6 @@ export class NotificationService {
       readByUserIds: [],
     };
 
-    // 2. Notification confirmation for Admin
     const adminNotif: AppNotification = {
       id: `notif-price-admin-${product.id}-${Date.now()}`,
       type: 'PRICE_CHANGE_ADMIN',
@@ -295,6 +284,59 @@ export class NotificationService {
   }
 
   /**
+   * FIX: Notify admins when a seller requests a sale edit
+   */
+  public static notifySaleEditRequested(request: any, adminUserId: string): void {
+    const notification: AppNotification = {
+      id: `notif-sale-edit-req-${request.id}`,
+      type: 'SALE_EDIT_REQUESTED',
+      category: 'WARNING',
+      title: 'Ombi la Marekebisho ya Mauzo',
+      message: `${request.requestedByName} ameomba kuhariri mauzo. Sababu: ${request.reason}`,
+      isGlobal: false,
+      targetUserIds: [adminUserId],
+      targetRole: 'ADMIN',
+      relatedEntityId: request.id,
+      relatedEntityType: 'SALE_EDIT_REQUEST',
+      createdAt: new Date().toISOString(),
+      readByUserIds: [],
+    };
+
+    db.addNotification(notification);
+  }
+
+  /**
+   * FIX: Notify seller when their sale edit request is reviewed
+   */
+  public static notifySaleEditReviewed(
+    request: any,
+    action: 'APPROVE' | 'REJECT',
+    adminName: string,
+    reviewNote?: string
+  ): void {
+    const isApproved = action === 'APPROVE';
+    
+    const notification: AppNotification = {
+      id: `notif-sale-edit-review-${request.id}-${Date.now()}`,
+      type: isApproved ? 'SALE_EDIT_APPROVED' : 'SALE_EDIT_REJECTED',
+      category: isApproved ? 'SUCCESS' : 'WARNING',
+      title: isApproved ? 'Ombi Lako Limekubaliwa' : 'Ombi Lako Limekataliwa',
+      message: isApproved 
+        ? `Ombi lako la kuhariri mauzo limekubaliwa na ${adminName}.`
+        : `Ombi lako la kuhariri mauzo limekataliwa na ${adminName}.${reviewNote ? ` Sababu: ${reviewNote}` : ''}`,
+      isGlobal: false,
+      targetUserIds: [request.requestedByUserId],
+      targetRole: 'SELLER',
+      relatedEntityId: request.id,
+      relatedEntityType: 'SALE_EDIT_REQUEST',
+      createdAt: new Date().toISOString(),
+      readByUserIds: [],
+    };
+
+    db.addNotification(notification);
+  }
+
+  /**
    * Get notifications visible to the currently logged in user based on role and shop assignments
    */
   public static getUserNotifications(user: User | null): AppNotification[] {
@@ -303,22 +345,17 @@ export class NotificationService {
     const all = db.getNotifications();
 
     return all.filter(n => {
-      // Global broadcast notifications
       if (n.isGlobal) return true;
 
-      // Admin receives everything intended for Admin or ALL, across all shops, plus all debt notifications
       if (user.role === 'ADMIN') {
-        if (n.targetRole === 'SELLER') return false; // Seller-only specific notices
+        if (n.targetRole === 'SELLER') return false;
         return true;
       }
 
-      // Seller: must not receive ADMIN-only notices
       if (n.targetRole === 'ADMIN') return false;
 
-      // Specifically targeted by User IDs (e.g. debt registered by this specific user)
       if (n.targetUserIds && n.targetUserIds.length > 0) {
         if (n.targetUserIds.includes(user.id)) return true;
-        // If it's a debt and not created by this user, only show if assigned to target shop
         if (n.relatedEntityType === 'DEBT') {
           if (n.targetShopId && user.assignedShopIds?.includes(n.targetShopId)) {
             return true;
@@ -327,13 +364,11 @@ export class NotificationService {
         }
       }
 
-      // Seller: if notification is shop-specific, check assignment
       if (n.targetShopId) {
         const assigned = user.assignedShopIds || [];
         return assigned.includes(n.targetShopId);
       }
 
-      // If debt has no shop and no target user id match, seller should not see it
       if (n.relatedEntityType === 'DEBT') {
         return false;
       }
