@@ -21,7 +21,7 @@ export async function onRequestGet(context: any) {
     const shopsResult = await env.DB.prepare('SELECT * FROM shops WHERE updated_at > ?').bind(since).all();
     state.shops = shopsResult.results;
 
-    // FIX: Always return ALL users (permissions may change without updated_at)
+    // Always return ALL users (permissions may change)
     const usersResult = await env.DB.prepare('SELECT * FROM users').all();
     state.users = usersResult.results;
 
@@ -59,6 +59,14 @@ export async function onRequestGet(context: any) {
 
     const debtsResult = await env.DB.prepare('SELECT * FROM debts WHERE updated_at > ?').bind(since).all();
     state.debts = debtsResult.results;
+
+    // FIX: Always return ALL sale edit requests (so pending ones always show)
+    const saleEditRequestsResult = await env.DB.prepare('SELECT * FROM sale_edit_requests').all();
+    state.saleEditRequests = saleEditRequestsResult.results;
+
+    // FIX: Also return debt payments
+    const debtPaymentsResult = await env.DB.prepare('SELECT * FROM debt_payments').all();
+    state.debtPayments = debtPaymentsResult.results;
 
     const settingsResult = await env.DB.prepare('SELECT * FROM settings WHERE id = ?').bind('global').first();
     state.settings = settingsResult;
