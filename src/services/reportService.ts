@@ -50,7 +50,12 @@ export class ReportService {
       currentUser = maybeUser as User;
     }
 
-    if (!currentUser || currentUser.role !== 'ADMIN') {
+    // FIX: Allow Admin OR Seller with canViewReports permission
+    if (!currentUser) {
+      throw new Error('Permission Denied: User not found.');
+    }
+    
+    if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canViewReports) {
       throw new Error('Permission Denied: Financial reporting is restricted to Administrators.');
     }
 
@@ -70,6 +75,11 @@ export class ReportService {
 
     if (options.sellerId && options.sellerId !== 'ALL') {
       filteredSales = filteredSales.filter(s => s.sellerId === options.sellerId);
+    }
+
+    // If seller (not admin) without full access, only show their own sales
+    if (currentUser.role === 'SELLER' && !currentUser.permissions?.canViewReports) {
+      filteredSales = filteredSales.filter(s => s.sellerId === currentUser.id);
     }
 
     // Filter by date range if specified
