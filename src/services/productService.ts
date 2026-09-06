@@ -148,6 +148,14 @@ export class ProductService {
     },
     currentUser: User
   ): Promise<{ success: boolean; product?: Product; error?: string }> {
+    // Sellers can create products for their assigned shops
+    if (currentUser.role === 'SELLER') {
+      const assigned = currentUser.assignedShopIds || [];
+      if (assigned.length > 0 && !assigned.includes(data.shopId)) {
+        return { success: false, error: 'Permission Denied: You are not assigned to this shop.' };
+      }
+    }
+
     if (!data.name?.trim()) {
       return { success: false, error: 'Product name is required.' };
     }
@@ -264,17 +272,18 @@ export class ProductService {
   }
 
   /**
-   * Only Admin can edit existing products.
+   * Admin or Seller with canEditProducts permission can edit existing products.
    */
   public static async updateProduct(
     id: string,
     updates: Partial<Omit<Product, 'id' | 'createdAt'>>,
     currentUser: User
   ): Promise<{ success: boolean; product?: Product; error?: string }> {
-    if (currentUser.role !== 'ADMIN') {
+    // FIX: Allow Admin OR Seller with canEditProducts permission
+    if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canEditProducts) {
       return {
         success: false,
-        error: 'Permission Denied: Sellers cannot edit existing products. Please request an Administrator.',
+        error: 'Permission Denied: You do not have permission to edit products.',
       };
     }
 
@@ -349,17 +358,68 @@ export class ProductService {
 
   /**
    * Toggle Product Active/Inactive status.
-   * Admin only. Permanent deletion is avoided to preserve historical sales.
+   * Admin or Seller with canEditProducts permission.
    */
   public static toggleProductStatus(
     id: string,
     newStatus: ProductStatus,
     currentUser: User
   ): { success: boolean; error?: string } {
-    if (currentUser.role !== 'ADMIN') {
-      return { success: false, error: 'Permission Denied: Only Admin can change product status.' };
+    // FIX: Allow Admin OR Seller with canEditProducts permission
+    if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canEditProducts) {
+      return { success: false, error: 'Permission Denied: You do not have permission to change product status.' };
     }
 
     return this.updateProduct(id, { status: newStatus }, currentUser);
+  }
+
+  /**
+   * Delete a product permanently.
+   * Admin or Seller with canDeleteProducts permission.
+   */
+  public static deleteProduct(
+    productId: string,
+    currentUser: User
+  ): { success: boolean; error?: string } {
+    // FIX: Allow Admin OR Seller with canDeleteProducts permission
+    if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canDeleteProducts) {
+      return { success: false, error: 'Permission Denied: You do not have permission to delete products.' };
+    }
+
+    const products = db.getProducts();
+    const product = products.find(p => p.id === productId);
+    
+    if (!product) {
+      return { success: false, error: 'Product not found.' };
+    }
+
+    // Remove product
+    const updatedProducts = products.filter(p => p.id !== productId);
+    db.saveProducts(updatedProducts);
+
+    // Sync to cloud
+    db.enqueueSync({
+      id: generateUUID(),
+      operation: 'DELETE_PRODUCT',
+      entityType: 'PRODUCT',
+      entityId: productId,
+      payload: { id: productId },
+      status: 'PENDING',
+      createdAt: new Date().toISOString(),
+    });
+
+    // Audit log
+    db.addAuditLog({
+      id: generateUUID(),
+      userId: currentUser.id,
+      userName: currentUser.name,
+      action: 'DELETE_PRODUCT',
+      details: `Deleted product: ${product.name} (${product.sku})`,
+      entityType: 'PRODUCT',
+      entityId: productId,
+      timestamp: new Date().toISOString(),
+    });
+
+    return { success: true };
   }
 }
