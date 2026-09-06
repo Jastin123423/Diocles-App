@@ -143,15 +143,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   /**
    * PULL LATEST CLOUD DATA
-   * Only called every 15 minutes (not on every db change)
+   * Pulls every 15 minutes or on first load
    */
-  const pullCloudData = async () => {
+  const pullCloudData = async (force: boolean = false) => {
     if (isSyncingRef.current) return;
     
     const now = Date.now();
     const timeSinceLastPull = now - lastPullTimeRef.current;
     
-    if (timeSinceLastPull < PULL_INTERVAL) return;
+    if (!force && timeSinceLastPull < PULL_INTERVAL) return;
     
     isSyncingRef.current = true;
     
@@ -164,12 +164,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       
       console.log('[Sync] Pulling cloud data...');
       
+      // Pass no since parameter to get ALL data on first load
       const pullResult = await CloudflareApi.pullSync();
       
       if (pullResult.success && pullResult.data) {
         SyncService.applyCloudData(pullResult.data);
         
         localStorage.setItem('omnibiz_last_synced_at', new Date().toISOString());
+        localStorage.setItem('omnibiz_has_synced', 'true');
         
         const state = db.getState();
         setDbState({ ...state });
@@ -186,7 +188,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
-  // 1. Listen to LocalDB changes and push immediately
+  // 1. FORCE FULL PULL ON FIRST LOAD (for incognito/new devices)
+  useEffect(() => {
+    const hasSynced = localStorage.getItem('omnibiz_has_synced');
+    
+    if (!hasSynced) {
+      console.log('[FirstLoad] No previous sync - pulling all data from D1...');
+      pullCloudData(true);
+    } else {
+      console.log('[FirstLoad] Has synced before - loading from local storage');
+    }
+  }, []);
+
+  // 2. Listen to LocalDB changes and push immediately
   useEffect(() => {
     const unsubscribe = db.subscribe(() => {
       const state = db.getState();
@@ -222,24 +236,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => unsubscribe();
   }, [currentUser]);
 
-  // 2. Pull cloud data every 15 minutes
+  // 3. Pull cloud data every 15 minutes
   useEffect(() => {
-    // Initial pull on login
-    pullCloudData();
+    // Pull on login (if user logs in)
+    if (currentUser) {
+      pullCloudData(false);
+    }
     
     // Pull every 15 minutes
-    const interval = setInterval(pullCloudData, PULL_INTERVAL);
+    const interval = setInterval(() => pullCloudData(false), PULL_INTERVAL);
     
     return () => clearInterval(interval);
   }, [currentUser]);
 
-  // 3. Push on reconnect
+  // 4. Push on reconnect
   useEffect(() => {
     const handleOnline = () => {
       console.log('[Sync] Connection restored - pushing pending items');
       pushPendingItems();
-      // Also pull on reconnect if enough time has passed
-      pullCloudData();
+      // Pull on reconnect
+      pullCloudData(true);
     };
 
     const handleOffline = () => {
@@ -307,8 +323,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       description: `Logged in as ${freshUser.role}`,
     });
     
-    // Push any pending items immediately after login
-    setTimeout(() => pushPendingItems(), 1000);
+    // Push any pending items and pull latest data after login
+    setTimeout(() => {
+      pushPendingItems();
+      pullCloudData(false);
+    }, 1000);
   };
 
   const logout = () => {
@@ -352,8 +371,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // Push pending items
     await pushPendingItems();
     
-    // Pull latest data
-    await pullCloudData();
+    // Pull latest data (force)
+    await pullCloudData(true);
     
     setSyncStatus(SyncService.getSyncStatus());
     
