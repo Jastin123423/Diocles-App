@@ -5,7 +5,7 @@ import { generateUUID } from '../utils/crypto';
 export class InventoryService {
   /**
    * Adjust stock manually for count correction, damage, loss, or physical inventory.
-   * Admin only. Calculates loss value at purchase cost.
+   * Admin OR Seller with canManageInventory permission.
    */
   public static adjustStock(
     productId: string,
@@ -14,8 +14,9 @@ export class InventoryService {
     currentUser: User,
     movementType: MovementType = 'ADJUSTMENT'
   ): { success: boolean; error?: string; lossValue?: number } {
-    if (currentUser.role !== 'ADMIN') {
-      return { success: false, error: 'Permission Denied: Only Admin can adjust stock levels.' };
+    // FIX: Allow Admin OR Seller with canManageInventory permission
+    if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canManageInventory) {
+      return { success: false, error: 'Permission Denied: You do not have permission to adjust stock levels.' };
     }
 
     if (!reason?.trim()) {
@@ -64,7 +65,7 @@ export class InventoryService {
     };
     db.saveMovements([movement, ...db.getMovements()]);
 
-    // FIXED: Include ALL movement data in sync payload
+    // Include ALL movement data in sync payload
     db.enqueueSync({
       id: generateUUID(),
       operation: 'STOCK_ADJUSTMENT',
@@ -91,7 +92,7 @@ export class InventoryService {
 
   /**
    * Receive fast stock-in.
-   * Admin only.
+   * Admin OR Seller with canManageInventory permission.
    */
   public static stockIn(
     productId: string,
@@ -99,8 +100,9 @@ export class InventoryService {
     reason: string,
     currentUser: User
   ): { success: boolean; error?: string } {
-    if (currentUser.role !== 'ADMIN') {
-      return { success: false, error: 'Permission Denied: Only Admin can perform stock-in.' };
+    // FIX: Allow Admin OR Seller with canManageInventory permission
+    if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canManageInventory) {
+      return { success: false, error: 'Permission Denied: You do not have permission to perform stock-in.' };
     }
 
     if (addQuantity <= 0) {
