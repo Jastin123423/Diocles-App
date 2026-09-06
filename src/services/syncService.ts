@@ -1,4 +1,4 @@
-// src/services/syncService.ts (OPTIMIZED - 60s interval, sync only when pending data, permissions parsing fixed)
+// src/services/syncService.ts (COMPLETE WITH SALE EDIT REQUESTS PULL)
 import { db } from '../db/storage';
 import { SyncQueueItem, User } from '../types';
 import { CloudflareApi } from './cloudflareApi';
@@ -10,33 +10,19 @@ export class SyncService {
   private static isSyncing = false;
   private static lastSyncedAt: string | null = localStorage.getItem('omnibiz_last_synced_at');
   private static lastSyncAttempt: number = 0;
-  private static readonly SYNC_INTERVAL_MS = 60000; // 60 seconds minimum between background syncs
+  private static readonly SYNC_INTERVAL_MS = 60000;
   private static hasLocalChanges = false;
 
-  /**
-   * Mark that local data has changed and needs syncing.
-   * Call this whenever any local write happens (create, update, delete).
-   */
   public static markLocalChanged(): void {
     this.hasLocalChanges = true;
   }
 
-  /**
-   * Check if sync should run:
-   * - Always if there are pending items in queue
-   * - Only after 60s interval if there are local changes
-   */
   public static shouldSync(): boolean {
     const pendingCount = this.getPendingCount();
-    
-    // Always sync if there are pending items
     if (pendingCount > 0) return true;
     
-    // Check if 60 seconds have passed since last sync attempt
     const now = Date.now();
     const timeSinceLastSync = now - this.lastSyncAttempt;
-    
-    // Only sync after interval AND if there are local changes
     return this.hasLocalChanges && timeSinceLastSync >= this.SYNC_INTERVAL_MS;
   }
 
@@ -78,24 +64,14 @@ export class SyncService {
   }
 
   public static async processSyncQueue(currentUser?: User): Promise<{ success: boolean; processedCount: number; message?: string }> {
-    // Skip if sync not needed (no pending, no local changes, or too soon)
     if (!this.shouldSync() && !this.isSyncing) {
-      return { 
-        success: true, 
-        processedCount: 0, 
-        message: 'Sync skipped - no pending changes' 
-      };
+      return { success: true, processedCount: 0, message: 'Sync skipped - no pending changes' };
     }
 
-    // Try cloud sync first
     const online = await CloudflareApi.checkConnection();
     
     if (!online) {
-      return { 
-        success: false, 
-        processedCount: 0, 
-        message: 'Offline mode: Working locally. Will sync when online.' 
-      };
+      return { success: false, processedCount: 0, message: 'Offline mode: Working locally. Will sync when online.' };
     }
 
     if (SyncService.isSyncing) {
@@ -109,7 +85,6 @@ export class SyncService {
       const queue = db.getSyncQueue();
       const pendingItems = queue.filter(item => item.status === 'PENDING');
 
-      // 1. PUSH local changes if any
       if (pendingItems.length > 0) {
         const operations = pendingItems.map(item => ({
           id: item.id,
@@ -130,13 +105,11 @@ export class SyncService {
           });
           db.saveSyncQueue(updatedQueue);
 
-          // Update lastSyncedAt immediately after push
           this.lastSyncedAt = new Date().toISOString();
           localStorage.setItem('omnibiz_last_synced_at', this.lastSyncedAt);
         }
       }
 
-      // 2. PULL latest cloud data (only if there were pending items OR local changes)
       if (pendingItems.length > 0 || this.hasLocalChanges) {
         const pullResult = await CloudflareApi.pullSync(this.lastSyncedAt || undefined);
         
@@ -147,7 +120,6 @@ export class SyncService {
         }
       }
 
-      // Reset local changes flag after successful sync
       this.hasLocalChanges = false;
       SyncService.isSyncing = false;
 
@@ -236,7 +208,7 @@ export class SyncService {
       db.saveShops(merged);
     }
 
-    // Apply users - WITH PERMISSIONS PARSING FIX
+    // Apply users
     if (cloudData.users && cloudData.users.length > 0) {
       const localUsers = db.getUsers();
       const mergedUsers = [...localUsers];
@@ -244,7 +216,6 @@ export class SyncService {
       cloudData.users.forEach((cloudUser: any) => {
         const index = mergedUsers.findIndex(u => u.id === cloudUser.id);
         
-        // FIX: Handle permissions that may be a string OR object
         let parsedPermissions: any = {};
         try {
           if (cloudUser.permissions) {
@@ -257,7 +228,6 @@ export class SyncService {
           parsedPermissions = {};
         }
         
-        // FIX: Handle assigned_shop_ids that may be a string OR array
         let parsedShopIds: string[] = [];
         try {
           if (cloudUser.assigned_shop_ids) {
@@ -570,6 +540,59 @@ export class SyncService {
       });
       
       db.saveMovements(mergedMovements);
+    }
+
+    // FIX: Apply sale edit requests
+    if (cloudData.saleEditRequests && cloudData.saleEditRequests.length > 0) {
+      const localRequests = db.getSaleEditRequests();
+      const mergedRequests = [...localRequests];
+      
+      cloudData.saleEditRequests.forEach((cloudRequest: any) => {
+        const index = mergedRequests.findIndex(r => r.id === cloudRequest.id);
+        
+        let parsedOriginalValues = {};
+        let parsedNewValues = {};
+        
+        try {
+          parsedOriginalValues = typeof cloudRequest.original_values === 'string' 
+            ? JSON.parse(cloudRequest.original_values) 
+            : cloudRequest.original_values;
+        } catch (e) {
+          console.warn('Failed to parse original_values:', e);
+        }
+        
+        try {
+          parsedNewValues = typeof cloudRequest.new_values === 'string' 
+            ? JSON.parse(cloudRequest.new_values) 
+            : cloudRequest.new_values;
+        } catch (e) {
+          console.warn('Failed to parse new_values:', e);
+        }
+        
+        const requestData = {
+          id: cloudRequest.id,
+          saleId: cloudRequest.sale_id,
+          requestedByUserId: cloudRequest.requested_by_user_id,
+          requestedByName: cloudRequest.requested_by_name,
+          originalValues: parsedOriginalValues,
+          newValues: parsedNewValues,
+          reason: cloudRequest.reason,
+          status: cloudRequest.status,
+          reviewedByUserId: cloudRequest.reviewed_by_user_id,
+          reviewedByName: cloudRequest.reviewed_by_name,
+          reviewNote: cloudRequest.review_note,
+          createdAt: cloudRequest.created_at,
+          reviewedAt: cloudRequest.reviewed_at,
+        };
+        
+        if (index === -1) {
+          mergedRequests.push(requestData);
+        } else {
+          mergedRequests[index] = { ...mergedRequests[index], ...requestData };
+        }
+      });
+      
+      db.saveSaleEditRequests(mergedRequests);
     }
 
     // Apply settings
