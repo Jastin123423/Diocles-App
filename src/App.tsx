@@ -60,6 +60,12 @@ const MainLayout: React.FC = () => {
         case 'purchases':
           // Sellers can always view/record purchases
           return <AdminPurchases />;
+        case 'sales':
+          // ADDED: Allow seller with canEditSales or canDeleteSales to view sales history
+          if (permissions.canEditSales || permissions.canDeleteSales) {
+            return <AdminSales />;
+          }
+          return <SellerDashboard />;
         case 'inventory':
           // Only if seller has canManageInventory permission
           if (permissions.canManageInventory) {
