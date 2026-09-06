@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Search,
   Receipt,
@@ -16,9 +16,13 @@ import {
   Pencil,
   Check,
   Clock,
+  RefreshCw,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { SalesService, CartItemInput } from '../../services/salesService';
+import { CloudflareApi } from '../../services/cloudflareApi';
+import { SyncService } from '../../services/syncService';
+import { db } from '../../db/storage';
 import { Sale, SaleEditRequest } from '../../types';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 
@@ -32,6 +36,7 @@ export const AdminSales: React.FC = () => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [isPrinting, setIsPrinting] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Void Sale Dialog
   const [voidingSale, setVoidingSale] = useState<Sale | null>(null);
@@ -55,6 +60,54 @@ export const AdminSales: React.FC = () => {
   const canEditSale = currentUser.role === 'ADMIN' || currentUser.permissions?.canEditSales;
   const canVoidSale = currentUser.role === 'ADMIN' || currentUser.permissions?.canDeleteSales;
   const isAdmin = currentUser.role === 'ADMIN';
+
+  // FIX: Force pull when component mounts to get latest sale edit requests
+  useEffect(() => {
+    const forcePull = async () => {
+      try {
+        const online = await CloudflareApi.checkConnection();
+        if (!online) return;
+        
+        console.log('[AdminSales] Pulling latest sale edit requests...');
+        const pullResult = await CloudflareApi.pullSync();
+        
+        if (pullResult.success && pullResult.data) {
+          SyncService.applyCloudData(pullResult.data);
+          
+          // Force re-render
+          const state = db.getState();
+          console.log('[AdminSales] Pull completed, edit requests:', state.saleEditRequests?.length || 0);
+        }
+      } catch (error) {
+        console.log('[AdminSales] Pull error:', error);
+      }
+    };
+    
+    forcePull();
+  }, []);
+
+  // FIX: Manual refresh function
+  const refreshEditRequests = async () => {
+    setIsRefreshing(true);
+    try {
+      const online = await CloudflareApi.checkConnection();
+      if (!online) {
+        addToast({ type: 'error', title: 'Offline', description: 'Cannot refresh while offline.' });
+        return;
+      }
+      
+      const pullResult = await CloudflareApi.pullSync();
+      if (pullResult.success && pullResult.data) {
+        SyncService.applyCloudData(pullResult.data);
+        addToast({ type: 'success', title: 'Refreshed', description: 'Sale edit requests updated.' });
+      }
+    } catch (error) {
+      console.log('Refresh error:', error);
+      addToast({ type: 'error', title: 'Refresh Failed', description: 'Could not refresh data.' });
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const settings = dbState.settings;
   const sellers = dbState.users.filter(u => u.role === 'SELLER');
@@ -381,22 +434,32 @@ export const AdminSales: React.FC = () => {
       </div>
 
       {/* Pending Edit Requests Section - Only for admins or users with canEditSales */}
-      {canEditSale && pendingRequests.length > 0 && (
+      {canEditSale && (
         <div className="mb-5 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-bold text-amber-300 flex items-center gap-2">
               <Clock className="w-4 h-4" />
               Maombi ya Marekebisho Yanayosubiri ({pendingRequests.length})
             </h3>
-            <button
-              onClick={() => setShowEditRequests(!showEditRequests)}
-              className="text-xs text-slate-400 hover:text-white transition"
-            >
-              {showEditRequests ? 'Ficha' : 'Onyesha'}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={refreshEditRequests}
+                disabled={isRefreshing}
+                className="flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 transition"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+                {isRefreshing ? 'Refreshing...' : 'Refresh'}
+              </button>
+              <button
+                onClick={() => setShowEditRequests(!showEditRequests)}
+                className="text-xs text-slate-400 hover:text-white transition"
+              >
+                {showEditRequests ? 'Ficha' : 'Onyesha'}
+              </button>
+            </div>
           </div>
 
-          {showEditRequests && pendingRequests.map(request => (
+          {showEditRequests && pendingRequests.length > 0 && pendingRequests.map(request => (
             <div key={request.id} className="p-3 bg-slate-950 rounded-lg border border-slate-800 mb-2">
               <div className="flex justify-between items-start">
                 <div className="flex-1">
@@ -437,6 +500,12 @@ export const AdminSales: React.FC = () => {
               </div>
             </div>
           ))}
+
+          {showEditRequests && pendingRequests.length === 0 && (
+            <div className="p-4 text-center text-slate-500 text-xs">
+              Hakuna maombi ya marekebisho yanayosubiri.
+            </div>
+          )}
         </div>
       )}
 
