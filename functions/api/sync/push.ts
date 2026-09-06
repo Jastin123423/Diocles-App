@@ -24,6 +24,8 @@ export async function onRequestPost(context: any) {
   try {
     const { deviceId, operations } = await request.json();
     
+    console.log('[Push] Received operations:', operations?.length || 0);
+    
     if (!operations || !Array.isArray(operations)) {
       return new Response(JSON.stringify({ error: 'Invalid sync payload' }), {
         status: 400,
@@ -35,11 +37,14 @@ export async function onRequestPost(context: any) {
     const errors = [];
 
     for (const op of operations) {
+      console.log('[Push] Processing:', op.operation, 'ID:', op.entityId);
+      
       try {
         const result = await processOperation(env.DB, op);
         results.push({ id: op.id, success: true, ...result });
+        console.log('[Push] Success:', op.operation);
       } catch (error: any) {
-        console.error('Operation error:', op.operation, error);
+        console.error('[Push] Error:', op.operation, error.message);
         errors.push({ id: op.id, operation: op.operation, error: error.message });
       }
     }
@@ -54,7 +59,7 @@ export async function onRequestPost(context: any) {
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
     });
   } catch (error: any) {
-    console.error('Request error:', error);
+    console.error('[Push] Request error:', error);
     return new Response(JSON.stringify({ error: error.message }), {
       status: 500,
       headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
@@ -345,6 +350,8 @@ async function createSale(db: any, sale: any) {
 }
 
 async function updateSale(db: any, sale: any) {
+  console.log('[updateSale] Updating sale:', sale.id);
+  
   const oldSaleItems = await db.prepare(
     'SELECT product_id, quantity FROM sale_items WHERE sale_id = ?'
   ).bind(sale.id).all();
@@ -413,6 +420,8 @@ async function updateSale(db: any, sale: any) {
       item.productId
     ).run();
   }
+  
+  console.log('[updateSale] Sale updated successfully:', sale.id);
 }
 
 async function voidSale(db: any, payload: any) {
@@ -447,6 +456,8 @@ async function voidSale(db: any, payload: any) {
 }
 
 async function createPurchase(db: any, purchase: any) {
+  console.log('[createPurchase] Creating purchase:', purchase.id);
+  
   await db.prepare(`
     INSERT INTO purchases (
       id, purchase_number, shop_id, shop_name, supplier_name, date,
@@ -529,6 +540,8 @@ async function createPurchase(db: any, purchase: any) {
       ).run();
     }
   }
+  
+  console.log('[createPurchase] Purchase created:', purchase.id);
 }
 
 async function updatePurchase(db: any, purchase: any) {
@@ -617,6 +630,8 @@ async function updatePurchase(db: any, purchase: any) {
 }
 
 async function createSaleEditRequest(db: any, request: any) {
+  console.log('[createSaleEditRequest] Creating:', request.id);
+  
   await db.prepare(`
     INSERT INTO sale_edit_requests (
       id, sale_id, requested_by_user_id, requested_by_name,
@@ -641,9 +656,18 @@ async function createSaleEditRequest(db: any, request: any) {
     request.createdAt || new Date().toISOString(),
     request.reviewedAt || null
   ).run();
+  
+  console.log('[createSaleEditRequest] Created:', request.id);
 }
 
 async function reviewSaleEditRequest(db: any, request: any) {
+  console.log('[reviewSaleEditRequest] Reviewing:', request.id, 'status:', request.status);
+  
+  if (!request.id) {
+    console.error('[reviewSaleEditRequest] ERROR: No ID in request');
+    return;
+  }
+  
   await db.prepare(`
     UPDATE sale_edit_requests SET
       status = ?,
@@ -660,6 +684,8 @@ async function reviewSaleEditRequest(db: any, request: any) {
     request.reviewedAt || new Date().toISOString(),
     request.id
   ).run();
+  
+  console.log('[reviewSaleEditRequest] Updated:', request.id, 'to status:', request.status);
 }
 
 async function createExpense(db: any, expense: any) {
