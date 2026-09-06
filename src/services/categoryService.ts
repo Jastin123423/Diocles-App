@@ -50,13 +50,15 @@ export class CategoryService {
 
   /**
    * Create a new category assigned strictly to a specific shop
+   * Admin OR Seller with canEditProducts permission
    */
   public static createCategory(
     data: { name: string; shopId: string; icon?: string; color?: string },
     currentUser: User
   ): { success: boolean; category?: Category; error?: string } {
-    if (currentUser.role !== 'ADMIN') {
-      return { success: false, error: 'Permission Denied: Only Admin can create categories.' };
+    // FIX: Allow Admin OR Seller with canEditProducts permission
+    if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canEditProducts) {
+      return { success: false, error: 'Permission Denied: You do not have permission to create categories.' };
     }
 
     if (!data.name.trim()) {
@@ -126,14 +128,16 @@ export class CategoryService {
 
   /**
    * Update an existing category
+   * Admin OR Seller with canEditProducts permission
    */
   public static updateCategory(
     id: string,
     data: { name?: string; shopId?: string; icon?: string; color?: string; status?: 'ACTIVE' | 'INACTIVE' },
     currentUser: User
   ): { success: boolean; category?: Category; error?: string } {
-    if (currentUser.role !== 'ADMIN') {
-      return { success: false, error: 'Permission Denied: Only Admin can edit categories.' };
+    // FIX: Allow Admin OR Seller with canEditProducts permission
+    if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canEditProducts) {
+      return { success: false, error: 'Permission Denied: You do not have permission to edit categories.' };
     }
 
     const categories = db.getCategories();
