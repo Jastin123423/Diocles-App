@@ -351,13 +351,19 @@ async function createSale(db: any, sale: any) {
 
 async function updateSale(db: any, sale: any) {
   console.log('[updateSale] Updating sale:', sale.id);
+  console.log('[updateSale] Items:', sale.items?.length);
   
+  // 1. Get old sale items
   const oldSaleItems = await db.prepare(
     'SELECT product_id, quantity FROM sale_items WHERE sale_id = ?'
   ).bind(sale.id).all();
+  console.log('[updateSale] Old items found:', oldSaleItems.results?.length);
 
+  // 2. Reverse old stock
   if (oldSaleItems.results) {
     for (const oldItem of oldSaleItems.results) {
+      console.log('[updateSale] Reversing stock for:', oldItem.product_id, 'qty:', oldItem.quantity);
+      
       await db.prepare(`
         UPDATE products 
         SET current_stock = current_stock + ?,
@@ -371,8 +377,11 @@ async function updateSale(db: any, sale: any) {
     }
   }
 
+  // 3. Delete old sale items
   await db.prepare('DELETE FROM sale_items WHERE sale_id = ?').bind(sale.id).run();
+  console.log('[updateSale] Old items deleted');
 
+  // 4. Update sale metadata
   await db.prepare(`
     UPDATE sales SET
       subtotal = ?,
@@ -395,33 +404,65 @@ async function updateSale(db: any, sale: any) {
     sale.notes || null,
     sale.id
   ).run();
+  console.log('[updateSale] Sale metadata updated');
 
+  // 5. Insert new sale items with ON CONFLICT DO NOTHING
   for (const item of (sale.items || [])) {
+    console.log('[updateSale] Inserting item:', item.id, 'product:', item.productId, 'qty:', item.quantity);
+    
     await db.prepare(`
       INSERT INTO sale_items (
         id, sale_id, shop_id, product_id, product_name, sku,
         unit_price, purchase_price, quantity, discount, total
       )
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO NOTHING
     `).bind(
-      item.id || crypto.randomUUID(), sale.id, item.shopId || sale.shopId,
-      item.productId, item.productName, item.sku, item.unitPrice || 0,
-      item.purchasePrice || 0, item.quantity || 0, item.discount || 0, item.total || 0
+      item.id || crypto.randomUUID(), 
+      sale.id, 
+      item.shopId || sale.shopId,
+      item.productId, 
+      item.productName, 
+      item.sku, 
+      item.unitPrice || 0,
+      item.purchasePrice || 0, 
+      item.quantity || 0, 
+      item.discount || 0, 
+      item.total || 0
     ).run();
 
-    await db.prepare(`
-      UPDATE products 
-      SET current_stock = current_stock - ?,
-          updated_at = ?
-      WHERE id = ?
-    `).bind(
-      item.quantity || 0,
-      new Date().toISOString(),
-      item.productId
-    ).run();
+    // 6. Subtract new stock
+    console.log('[updateSale] Subtracting stock for:', item.productId, 'qty:', item.quantity);
+    
+    const product = await db.prepare(
+      'SELECT current_stock FROM products WHERE id = ?'
+    ).bind(item.productId).first();
+    
+    if (product) {
+      console.log('[updateSale] Stock before:', product.current_stock);
+      
+      await db.prepare(`
+        UPDATE products 
+        SET current_stock = current_stock - ?,
+            updated_at = ?
+        WHERE id = ?
+      `).bind(
+        item.quantity || 0,
+        new Date().toISOString(),
+        item.productId
+      ).run();
+      
+      const afterProduct = await db.prepare(
+        'SELECT current_stock FROM products WHERE id = ?'
+      ).bind(item.productId).first();
+      
+      console.log('[updateSale] Stock after:', afterProduct?.current_stock);
+    } else {
+      console.log('[updateSale] Product NOT found:', item.productId);
+    }
   }
   
-  console.log('[updateSale] Sale updated successfully:', sale.id);
+  console.log('[updateSale] Completed for sale:', sale.id);
 }
 
 async function voidSale(db: any, payload: any) {
@@ -587,6 +628,7 @@ async function updatePurchase(db: any, purchase: any) {
     await db.prepare(`
       INSERT INTO purchase_items (id, purchase_id, product_id, product_name, quantity, unit_cost, total)
       VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO NOTHING
     `).bind(
       item.id || crypto.randomUUID(), 
       purchase.id, 
