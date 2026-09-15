@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   CreditCard,
   Plus,
@@ -28,11 +28,18 @@ const EXPENSE_CATEGORIES: { id: ExpenseCategory; label: string }[] = [
   { id: 'OTHER', label: 'General / Miscellaneous' },
 ];
 
+type PeriodFilter = 'today' | 'week' | 'month' | 'year' | 'custom' | 'all';
+
 export const AdminExpenses: React.FC = () => {
   const { currentUser, dbState, addToast } = useApp();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
+  
+  // Period filter state
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('month');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
 
   // Form State
   const [title, setTitle] = useState('');
@@ -50,15 +57,86 @@ export const AdminExpenses: React.FC = () => {
   const canRecordExpense = currentUser.role === 'ADMIN' || currentUser.permissions?.canRecordExpenses;
 
   const settings = dbState.settings;
-  const expenses = ExpenseService.getExpenses(
-    {
-      category: categoryFilter === 'ALL' ? undefined : (categoryFilter as ExpenseCategory),
-      search: searchQuery,
-    },
-    currentUser
-  );
+
+  // Compute date range based on period filter
+  const dateRange = useMemo(() => {
+    const now = new Date();
+    
+    switch (periodFilter) {
+      case 'today': {
+        const d = now.toISOString().slice(0, 10);
+        return { from: d, to: d };
+      }
+      case 'week': {
+        const past = new Date(now.getTime() - 7 * 86400000);
+        return { 
+          from: past.toISOString().slice(0, 10), 
+          to: now.toISOString().slice(0, 10) 
+        };
+      }
+      case 'month': {
+        const past = new Date(now.getFullYear(), now.getMonth(), 1);
+        return { 
+          from: past.toISOString().slice(0, 10), 
+          to: now.toISOString().slice(0, 10) 
+        };
+      }
+      case 'year': {
+        const past = new Date(now.getFullYear(), 0, 1);
+        return { 
+          from: past.toISOString().slice(0, 10), 
+          to: now.toISOString().slice(0, 10) 
+        };
+      }
+      case 'custom': {
+        return { 
+          from: customStartDate || undefined, 
+          to: customEndDate || undefined 
+        };
+      }
+      case 'all':
+      default:
+        return { from: undefined, to: undefined };
+    }
+  }, [periodFilter, customStartDate, customEndDate]);
+
+  // Get expenses with all filters applied
+  const expenses = useMemo(() => {
+    return ExpenseService.getExpenses(
+      {
+        category: categoryFilter === 'ALL' ? undefined : (categoryFilter as ExpenseCategory),
+        search: searchQuery,
+        startDate: dateRange.from,
+        endDate: dateRange.to,
+      },
+      currentUser
+    );
+  }, [categoryFilter, searchQuery, dateRange, currentUser, dbState.expenses]);
 
   const totalSpent = expenses.reduce((sum, e) => sum + e.amount, 0);
+
+  // Compute top spend category
+  const topCategory = useMemo(() => {
+    const categoryTotals: Record<string, number> = {};
+    expenses.forEach(e => {
+      categoryTotals[e.category] = (categoryTotals[e.category] || 0) + e.amount;
+    });
+    
+    let topCat = '';
+    let topAmount = 0;
+    Object.entries(categoryTotals).forEach(([cat, amt]) => {
+      if (amt > topAmount) {
+        topAmount = amt;
+        topCat = cat;
+      }
+    });
+    
+    if (topCat) {
+      const found = EXPENSE_CATEGORIES.find(c => c.id === topCat);
+      return found ? found.label : topCat;
+    }
+    return 'No data';
+  }, [expenses]);
 
   const openAddModal = () => {
     setTitle('');
@@ -110,6 +188,18 @@ export const AdminExpenses: React.FC = () => {
     }
   };
 
+  const getPeriodLabel = () => {
+    switch (periodFilter) {
+      case 'today': return 'Today';
+      case 'week': return 'Last 7 Days';
+      case 'month': return 'This Month';
+      case 'year': return 'This Year';
+      case 'custom': return 'Custom Range';
+      case 'all': return 'All Time';
+      default: return 'This Month';
+    }
+  };
+
   return (
     <div id="admin-expenses-view" className="flex-1 p-6 bg-slate-950 text-slate-100 overflow-y-auto">
       {/* Header */}
@@ -137,7 +227,9 @@ export const AdminExpenses: React.FC = () => {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
         <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl">
           <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider">Total Recorded Spend</span>
+            <span className="text-xs font-semibold uppercase tracking-wider">
+              Total Spend ({getPeriodLabel()})
+            </span>
             <TrendingDown className="w-4 h-4 text-rose-400" />
           </div>
           <div className="text-2xl font-bold text-rose-300 font-mono">
@@ -152,9 +244,9 @@ export const AdminExpenses: React.FC = () => {
             <PieChart className="w-4 h-4 text-blue-400" />
           </div>
           <div className="text-lg font-bold text-white truncate">
-            {EXPENSE_CATEGORIES[0]?.label}
+            {topCategory}
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">Automatic financial reporting included</p>
+          <p className="text-[11px] text-slate-400 mt-1">For selected period</p>
         </div>
 
         <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl">
@@ -171,10 +263,69 @@ export const AdminExpenses: React.FC = () => {
         </div>
       </div>
 
-      {/* Toolbar */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 mb-5 flex flex-wrap items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-3 flex-1 min-w-[240px]">
-          <div className="relative flex-1">
+      {/* Period Filter Tabs */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 mb-5 space-y-3 text-xs">
+        {/* Period buttons */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+            {[
+              { id: 'today', label: 'Today' },
+              { id: 'week', label: 'This Week' },
+              { id: 'month', label: 'This Month' },
+              { id: 'year', label: 'This Year' },
+              { id: 'all', label: 'All Time' },
+              { id: 'custom', label: 'Custom' },
+            ].map(p => (
+              <button
+                key={p.id}
+                onClick={() => setPeriodFilter(p.id as PeriodFilter)}
+                className={`px-3 py-1.5 rounded-lg transition font-semibold ${
+                  periodFilter === p.id
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Custom date inputs */}
+        {periodFilter === 'custom' && (
+          <div className="flex items-center gap-3 pt-2 border-t border-slate-800/80">
+            <Calendar className="w-4 h-4 text-slate-400" />
+            <span className="text-slate-400">From:</span>
+            <input
+              type="date"
+              value={customStartDate}
+              onChange={e => setCustomStartDate(e.target.value)}
+              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white"
+            />
+            <span className="text-slate-500">to</span>
+            <input
+              type="date"
+              value={customEndDate}
+              onChange={e => setCustomEndDate(e.target.value)}
+              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white"
+            />
+            {(customStartDate || customEndDate) && (
+              <button
+                onClick={() => {
+                  setCustomStartDate('');
+                  setCustomEndDate('');
+                }}
+                className="px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Search and category filter */}
+        <div className="flex flex-wrap items-center gap-3 pt-2 border-t border-slate-800/80">
+          <div className="relative flex-1 min-w-[240px]">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
@@ -197,6 +348,21 @@ export const AdminExpenses: React.FC = () => {
               </option>
             ))}
           </select>
+
+          {(periodFilter !== 'month' || searchQuery || categoryFilter !== 'ALL') && (
+            <button
+              onClick={() => {
+                setPeriodFilter('month');
+                setSearchQuery('');
+                setCategoryFilter('ALL');
+                setCustomStartDate('');
+                setCustomEndDate('');
+              }}
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition"
+            >
+              Reset Filters
+            </button>
+          )}
         </div>
       </div>
 
