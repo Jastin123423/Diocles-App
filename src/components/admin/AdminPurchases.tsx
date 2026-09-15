@@ -19,8 +19,8 @@ import type { Purchase } from '../../types';
 
 interface PurchaseItemInput {
   productId: string;
-  quantity: number | string; // Allow empty string
-  unitCost: number | string; // Allow empty string
+  quantity: number | string;
+  unitCost: number | string;
 }
 
 export const AdminPurchases: React.FC = () => {
@@ -39,12 +39,11 @@ export const AdminPurchases: React.FC = () => {
   const [items, setItems] = useState<PurchaseItemInput[]>([]);
   const [formError, setFormError] = useState('');
 
-  // Permission check: Admin OR Seller with canRecordPurchases/canViewPurchases
+  // FIX: Only require authentication, no permission check
   if (!currentUser) return null;
-  if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canRecordPurchases && !currentUser.permissions?.canViewPurchases) return null;
 
-  // Permission flag
-  const canRecordPurchase = currentUser.role === 'ADMIN' || currentUser.permissions?.canRecordPurchases;
+  // FIX: Both Admin and Seller can always record purchases (no permission required)
+  const canRecordPurchase = true;
 
   const settings = dbState.settings;
   const isSeller = currentUser.role === 'SELLER';
@@ -126,7 +125,6 @@ export const AdminPurchases: React.FC = () => {
     setPaymentStatus(purchase.paymentStatus);
     setNotes(purchase.notes || '');
     
-    // Load existing items into editable form
     setItems(
       (purchase.items || []).map(item => ({
         productId: item.productId,
@@ -190,14 +188,12 @@ export const AdminPurchases: React.FC = () => {
       return;
     }
 
-    // Convert items and validate
     const finalItems = items.map(item => ({
       productId: item.productId,
       quantity: parseFloat(item.quantity as string) || 0,
       unitCost: parseFloat(item.unitCost as string) || 0,
     }));
 
-    // Validate all items
     for (const item of finalItems) {
       if (item.quantity <= 0) {
         setFormError('Quantity must be greater than 0 for all items.');
@@ -216,7 +212,6 @@ export const AdminPurchases: React.FC = () => {
     const finalSupplierName = supplierName.trim() || 'Walk-in Supplier';
 
     if (editingPurchase) {
-      // UPDATE existing purchase with items
       const res = PurchaseService.updatePurchase(
         editingPurchase.id,
         {
@@ -242,7 +237,6 @@ export const AdminPurchases: React.FC = () => {
         setFormError(res.error || 'Failed to update purchase.');
       }
     } else {
-      // CREATE new purchase
       const res = PurchaseService.createPurchase(
         {
           shopId: purchaseShopId || availableShops[0]?.id || '',
@@ -383,7 +377,7 @@ export const AdminPurchases: React.FC = () => {
         </div>
       </div>
 
-      {/* Modal: New/Edit Purchase - Only if canRecordPurchase */}
+      {/* Modal: New/Edit Purchase */}
       {isModalOpen && canRecordPurchase && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl animate-in fade-in zoom-in-95 my-auto">
@@ -458,7 +452,7 @@ export const AdminPurchases: React.FC = () => {
                 </div>
               </div>
 
-              {/* Line Items Table */}
+              {/* Line Items */}
               <div>
                 <div className="flex items-center justify-between mb-2">
                   <label className="block text-slate-300 font-semibold uppercase tracking-wider text-[11px]">
@@ -576,7 +570,6 @@ export const AdminPurchases: React.FC = () => {
                 </div>
               </div>
 
-              {/* Total & Action */}
               <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
                 <div className="text-xs">
                   <span className="text-slate-400">Total Purchase Cost: </span>
