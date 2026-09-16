@@ -406,7 +406,7 @@ class LocalDatabase {
   public updateSaleEditRequest(requestId: string, patch: Partial<SaleEditRequest>): void {
     if (!this.memoryCache) this.init();
     const current = this.memoryCache!.saleEditRequests || [];
-    const updated = current.map(r => 
+    const updated = current.map(r =>
       r.id === requestId ? { ...r, ...patch } : r
     );
     this.memoryCache!.saleEditRequests = updated;
@@ -437,7 +437,9 @@ class LocalDatabase {
   public updateDebt(debtId: string, patch: Partial<DebtRecord>): void {
     if (!this.memoryCache) this.init();
     const current = this.memoryCache!.debts || [];
-    const updated = current.map(d => (d.id === debtId ? { ...d, ...patch, updatedAt: new Date().toISOString() } : d));
+    const updated = current.map(d =>
+      d.id === debtId ? { ...d, ...patch, updatedAt: new Date().toISOString() } : d
+    );
     this.memoryCache!.debts = updated;
     this.saveTable('debts', updated);
     this.notify();
@@ -468,9 +470,10 @@ class LocalDatabase {
     if (!this.memoryCache) this.init();
     const current = this.memoryCache!.notifications || [];
     const isDup = current.some(
-      n => n.type === notification.type &&
-           n.message === notification.message &&
-           n.relatedEntityId === notification.relatedEntityId
+      n =>
+        n.type === notification.type &&
+        n.message === notification.message &&
+        n.relatedEntityId === notification.relatedEntityId
     );
     if (!isDup) {
       const updated = [notification, ...current].slice(0, 300);
@@ -518,7 +521,7 @@ class LocalDatabase {
     const payload = {
       version: '2.0.0',
       exportedAt: new Date().toISOString(),
-      generator: 'Diocres Windows Desktop Business System',
+      generator: 'Diocres Android Mobile Business System',
       data,
     };
     return JSON.stringify(payload, null, 2);
@@ -553,15 +556,29 @@ class LocalDatabase {
 
       this.init();
       this.notify();
-      return { success: true, message: `Successfully restored backup from ${parsed.exportedAt || 'archive'}` };
+      return {
+        success: true,
+        message: `Successfully restored backup from ${parsed.exportedAt || 'archive'}`,
+      };
     } catch (e: any) {
-      return { success: false, message: `Failed to restore database: ${e.message || 'JSON parse error'}` };
+      return {
+        success: false,
+        message: `Failed to restore database: ${e.message || 'JSON parse error'}`,
+      };
     }
   }
 
   public wipeAllData(keepShopsAndAdmin: boolean = true): void {
-    const shops = keepShopsAndAdmin ? (this.memoryCache?.shops?.length ? this.memoryCache.shops : INITIAL_SHOPS) : INITIAL_SHOPS;
-    const users = keepShopsAndAdmin ? (this.memoryCache?.users?.length ? this.memoryCache.users : INITIAL_USERS) : INITIAL_USERS;
+    const shops = keepShopsAndAdmin
+      ? this.memoryCache?.shops?.length
+        ? this.memoryCache.shops
+        : INITIAL_SHOPS
+      : INITIAL_SHOPS;
+    const users = keepShopsAndAdmin
+      ? this.memoryCache?.users?.length
+        ? this.memoryCache.users
+        : INITIAL_USERS
+      : INITIAL_USERS;
     const settings = this.memoryCache?.settings || INITIAL_SETTINGS;
 
     this.saveTable('shops', shops);
@@ -579,7 +596,8 @@ class LocalDatabase {
         userId: users[0]?.id || 'user-admin-01',
         userName: users[0]?.name || 'Administrator',
         action: 'SYSTEM_INITIALIZATION',
-        details: 'Wiped all demo and transactional data in preparation for live Cloudflare deployment',
+        details:
+          'Wiped all demo and transactional data in preparation for live Cloudflare deployment',
         entityType: 'SETTINGS',
         timestamp: new Date().toISOString(),
         createdAt: new Date().toISOString(),
