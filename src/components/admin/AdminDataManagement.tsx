@@ -26,6 +26,7 @@ import { BackupService } from '../../services/backupService';
 import { QuickBooksService } from '../../services/quickbooksService';
 import { SyncService } from '../../services/syncService';
 import { CsvDataService, ImportValidationResult } from '../../services/csvDataService';
+import { ExcelImportService, ExcelParseResult } from '../../services/excelImportService';
 import { CsvDataType } from '../../types';
 import { formatDateTime } from '../../utils/formatters';
 
@@ -46,6 +47,13 @@ export const AdminDataManagement: React.FC = () => {
   const [validationResult, setValidationResult] = useState<ImportValidationResult | null>(null);
   const [isImporting, setIsImporting] = useState(false);
 
+  // EXCEL Import State
+  const [excelFile, setExcelFile] = useState<File | null>(null);
+  const [excelShopId, setExcelShopId] = useState<string>('');
+  const [excelParseResult, setExcelParseResult] = useState<ExcelParseResult | null>(null);
+  const [isParsingExcel, setIsParsingExcel] = useState(false);
+  const [isCommitting, setIsCommitting] = useState(false);
+
   // QuickBooks Import state
   const [qbImportText, setQbImportText] = useState('');
   const [qbImportResult, setQbImportResult] = useState<any>(null);
@@ -58,6 +66,7 @@ export const AdminDataManagement: React.FC = () => {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const csvFileInputRef = useRef<HTMLInputElement>(null);
+  const excelInputRef = useRef<HTMLInputElement>(null);
 
   if (!currentUser || currentUser.role !== 'ADMIN') return null;
 
@@ -246,7 +255,7 @@ export const AdminDataManagement: React.FC = () => {
   // Simulate Cloud Sync
   const handleSimulateSync = async () => {
     setIsSyncing(true);
-    const result = await SyncService.processSyncQueue(currentUser);
+    const result = await SyncService.processSyncQueue(currentUser, true);
     setIsSyncing(false);
 
     if (result.success) {
@@ -267,10 +276,10 @@ export const AdminDataManagement: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <Database className="w-6 h-6 text-blue-400" />
-            <h2 className="text-xl font-bold text-white tracking-tight">Data Management & CSV Center</h2>
+            <h2 className="text-xl font-bold text-white tracking-tight">Data Management & Excel Center</h2>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
-            Export & import CSV datasets per shop, download templates, audit import history, and manage local JSON backups
+            Import products from Excel per shop, export CSV datasets, audit import history, and manage local JSON backups
           </p>
         </div>
 
@@ -296,7 +305,7 @@ export const AdminDataManagement: React.FC = () => {
           }`}
         >
           <FileSpreadsheet className="w-4 h-4" />
-          <span>CSV Data Management</span>
+          <span>Import / Export</span>
         </button>
 
         <button
@@ -336,26 +345,26 @@ export const AdminDataManagement: React.FC = () => {
         </button>
       </div>
 
-      {/* SUB-TAB 1: CSV DATA MANAGEMENT */}
+      {/* SUB-TAB 1: IMPORT/EXPORT CENTER */}
       {activeSubTab === 'csv' && (
         <div className="space-y-6">
           {/* Sub Navigation Bar */}
           <div className="flex items-center gap-2 bg-slate-900/80 p-1.5 rounded-lg border border-slate-800 w-fit">
+            <button
+              onClick={() => setCsvSection('import')}
+              className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${
+                csvSection === 'import' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              📥 Import Excel
+            </button>
             <button
               onClick={() => setCsvSection('export')}
               className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${
                 csvSection === 'export' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              Export CSV
-            </button>
-            <button
-              onClick={() => setCsvSection('import')}
-              className={`px-3 py-1.5 rounded-md text-xs font-medium transition ${
-                csvSection === 'import' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              Import CSV
+              📤 Export CSV
             </button>
             <button
               onClick={() => setCsvSection('templates')}
@@ -363,7 +372,7 @@ export const AdminDataManagement: React.FC = () => {
                 csvSection === 'templates' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              CSV Templates
+              📋 CSV Templates
             </button>
             <button
               onClick={() => setCsvSection('history')}
@@ -371,11 +380,281 @@ export const AdminDataManagement: React.FC = () => {
                 csvSection === 'history' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              Import History ({importHistory.length})
+              📜 Import History ({importHistory.length})
             </button>
           </div>
 
-          {/* 1. EXPORT CSV SECTION */}
+          {/* 1. IMPORT EXCEL SECTION */}
+          {csvSection === 'import' && (
+            <div className="space-y-5">
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
+                <div>
+                  <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                    Import Products from Excel (.xlsx / .xls)
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Select the target shop below, then upload an Excel file with columns:{' '}
+                    <span className="text-slate-200 font-semibold">
+                      Product Name, Buying Price, Selling Price, Quantity
+                    </span>.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Target Shop <span className="text-rose-400">*</span>
+                    </label>
+                    <select
+                      value={excelShopId}
+                      onChange={e => {
+                        setExcelShopId(e.target.value);
+                        setExcelParseResult(null);
+                        setExcelFile(null);
+                        if (excelInputRef.current) excelInputRef.current.value = '';
+                      }}
+                      className="w-full bg-slate-950 text-xs text-white px-3 py-2 rounded-lg border border-slate-800 focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="">-- Select a shop --</option>
+                      {shops.map(sh => (
+                        <option key={sh.id} value={sh.id}>
+                          🏪 {sh.name} ({sh.code || 'UNIT'})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Excel File (.xlsx / .xls) <span className="text-rose-400">*</span>
+                    </label>
+                    <input
+                      ref={excelInputRef}
+                      type="file"
+                      accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel"
+                      disabled={!excelShopId}
+                      onChange={async e => {
+                        const file = e.target.files?.[0];
+                        if (!file) return;
+
+                        if (!excelShopId) {
+                          addToast({
+                            type: 'warning',
+                            title: 'Select Shop First',
+                            description: 'Please choose the target shop before uploading.',
+                          });
+                          return;
+                        }
+
+                        setExcelFile(file);
+                        setIsParsingExcel(true);
+                        const result = await ExcelImportService.parseExcelFile(file);
+                        setIsParsingExcel(false);
+                        setExcelParseResult(result);
+
+                        if (result.errors.length > 0) {
+                          addToast({
+                            type: 'warning',
+                            title: 'Validation Issues',
+                            description: `${result.errors.length} issue(s) found. Review before committing.`,
+                          });
+                        } else if (result.rows.length > 0) {
+                          addToast({
+                            type: 'success',
+                            title: 'Excel Parsed',
+                            description: `${result.rows.length} product rows ready to import.`,
+                          });
+                        }
+                      }}
+                      className="w-full bg-slate-950 text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-emerald-600 file:text-white hover:file:bg-emerald-500 cursor-pointer p-1 rounded-lg border border-slate-800 disabled:opacity-40"
+                    />
+                    {!excelShopId && (
+                      <p className="text-[11px] text-amber-400 mt-1">
+                        ⚠ Select a shop above to enable file upload.
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Format hint */}
+                <div className="p-3 bg-blue-950/30 border border-blue-800/40 rounded-lg text-xs text-blue-200">
+                  <strong>Excel Format:</strong>
+                  <div className="mt-1 font-mono text-[11px] text-blue-100">
+                    | Product Name | Buying Price | Selling Price | Quantity |
+                  </div>
+                  <div className="mt-1 text-[11px] text-slate-400">
+                    Header names are flexible: "Product Name", "Product", or "Name" work. Same for "Buying Price"/"Cost", "Selling Price"/"Price", "Quantity"/"Qty"/"Stock".
+                  </div>
+                </div>
+              </div>
+
+              {/* Parsing indicator */}
+              {isParsingExcel && (
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 text-center text-slate-400 text-xs">
+                  <RefreshCw className="w-5 h-5 mx-auto mb-2 animate-spin text-blue-400" />
+                  Reading Excel file...
+                </div>
+              )}
+
+              {/* Parse Result Preview */}
+              {excelParseResult && !isParsingExcel && (
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5 animate-in fade-in">
+                  <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
+                    <div>
+                      <h4 className="font-bold text-sm text-white">Excel Validation Summary</h4>
+                      <p className="text-xs text-slate-400">
+                        File: {excelFile?.name} • Sheet: {excelParseResult.sheetName}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      {excelParseResult.rows.length > 0 && (
+                        <button
+                          onClick={async () => {
+                            if (!excelShopId) return;
+                            setIsCommitting(true);
+                            const res = await ExcelImportService.commitImport(
+                              excelParseResult.rows,
+                              excelShopId,
+                              currentUser
+                            );
+                            setIsCommitting(false);
+
+                            if (res.errors.length === 0) {
+                              addToast({
+                                type: 'success',
+                                title: 'Import Successful',
+                                description: `${res.created} created, ${res.updated} updated in ${
+                                  shops.find(s => s.id === excelShopId)?.name
+                                }.`,
+                              });
+                              setExcelParseResult(null);
+                              setExcelFile(null);
+                              if (excelInputRef.current) excelInputRef.current.value = '';
+                            } else {
+                              addToast({
+                                type: 'error',
+                                title: 'Import Completed with Errors',
+                                description: `${res.created} created, ${res.updated} updated, ${res.errors.length} failed.`,
+                              });
+                            }
+                          }}
+                          disabled={isCommitting}
+                          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-5 py-2.5 rounded-lg shadow-sm transition disabled:opacity-50"
+                        >
+                          <CheckCircle2 className="w-4 h-4" />
+                          <span>
+                            {isCommitting
+                              ? 'Importing...'
+                              : `Confirm & Import to ${shops.find(s => s.id === excelShopId)?.name}`}
+                          </span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Metric cards */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 text-center">
+                      <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">
+                        Total Rows
+                      </span>
+                      <span className="text-sm font-bold text-slate-200">{excelParseResult.rows.length}</span>
+                    </div>
+                    <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 text-center">
+                      <span className="text-[10px] text-emerald-400 uppercase tracking-wider block mb-1">
+                        Ready to Import
+                      </span>
+                      <span className="text-sm font-bold text-emerald-400">
+                        {excelParseResult.rows.length - excelParseResult.errors.length}
+                      </span>
+                    </div>
+                    <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 text-center">
+                      <span className="text-[10px] text-rose-400 uppercase tracking-wider block mb-1">
+                        Errors
+                      </span>
+                      <span className="text-sm font-bold text-rose-400">
+                        {excelParseResult.errors.length}
+                      </span>
+                    </div>
+                    <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 text-center">
+                      <span className="text-[10px] text-blue-400 uppercase tracking-wider block mb-1">
+                        Target Shop
+                      </span>
+                      <span className="text-xs font-bold text-blue-300 truncate block">
+                        {shops.find(s => s.id === excelShopId)?.name || '-'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Errors */}
+                  {excelParseResult.errors.length > 0 && (
+                    <div className="p-4 bg-rose-950/20 border border-rose-800/40 rounded-lg space-y-2">
+                      <h5 className="text-xs font-bold text-rose-300 flex items-center gap-1.5">
+                        <AlertCircle className="w-4 h-4" />
+                        Errors ({excelParseResult.errors.length})
+                      </h5>
+                      <div className="max-h-40 overflow-y-auto space-y-1 text-xs text-rose-200">
+                        {excelParseResult.errors.map((err, i) => (
+                          <div key={i} className="flex items-start gap-2">
+                            <span className="font-mono text-[10px] bg-rose-900/60 px-1.5 py-0.5 rounded">
+                              Row {err.rowNumber}
+                            </span>
+                            <span className="break-words flex-1">{err.message}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Preview */}
+                  {excelParseResult.rows.length > 0 && (
+                    <div>
+                      <h5 className="text-xs font-bold text-slate-300 mb-2">
+                        Preview first 10 rows
+                      </h5>
+                      <div className="overflow-x-auto border border-slate-800 rounded-lg">
+                        <table className="w-full text-xs text-left">
+                          <thead className="bg-slate-950 text-slate-400 text-[11px]">
+                            <tr>
+                              <th className="p-2.5">Product Name</th>
+                              <th className="p-2.5 text-right">Buying Price</th>
+                              <th className="p-2.5 text-right">Selling Price</th>
+                              <th className="p-2.5 text-right">Quantity</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800">
+                            {excelParseResult.rows.slice(0, 10).map((r, idx) => (
+                              <tr key={idx} className="hover:bg-slate-800/40">
+                                <td className="p-2.5 font-medium text-white">{r.productName}</td>
+                                <td className="p-2.5 text-right font-mono text-slate-300">
+                                  {r.buyingPrice.toLocaleString()}
+                                </td>
+                                <td className="p-2.5 text-right font-mono text-emerald-400 font-semibold">
+                                  {r.sellingPrice.toLocaleString()}
+                                </td>
+                                <td className="p-2.5 text-right font-mono text-blue-300">
+                                  {r.quantity}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      {excelParseResult.rows.length > 10 && (
+                        <p className="text-[11px] text-slate-500 mt-1.5">
+                          ... and {excelParseResult.rows.length - 10} more rows
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 2. EXPORT CSV SECTION */}
           {csvSection === 'export' && (
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
               <div>
@@ -430,185 +709,6 @@ export const AdminDataManagement: React.FC = () => {
                   <span>Download {selectedExportType} CSV</span>
                 </button>
               </div>
-            </div>
-          )}
-
-          {/* 2. IMPORT CSV SECTION */}
-          {csvSection === 'import' && (
-            <div className="space-y-5">
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
-                <div>
-                  <h3 className="font-bold text-sm text-white">Import CSV Dataset (Offline Parser)</h3>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Upload a CSV file. The system will validate all rows offline, match shop assignments, prevent duplicate records, and allow you to review before committing.
-                  </p>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">Target Data Type</label>
-                    <select
-                      value={importDataType}
-                      onChange={e => {
-                        setImportDataType(e.target.value as CsvDataType);
-                        setValidationResult(null);
-                      }}
-                      className="w-full bg-slate-950 text-xs text-white px-3 py-2 rounded-lg border border-slate-800 focus:outline-none focus:border-blue-500"
-                    >
-                      <option value="PRODUCTS">📦 Products</option>
-                      <option value="EXPENSES">📉 Expenses</option>
-                      <option value="SELLERS">👥 Sellers</option>
-                      <option value="SHOPS">🏪 Shops</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">Select CSV File</label>
-                    <input
-                      ref={csvFileInputRef}
-                      type="file"
-                      accept=".csv"
-                      onChange={handleCsvFileSelected}
-                      className="w-full bg-slate-950 text-xs text-slate-300 file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-blue-600 file:text-white hover:file:bg-blue-500 cursor-pointer p-1 rounded-lg border border-slate-800"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Validation & Preview Result */}
-              {validationResult && (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5 animate-in fade-in">
-                  <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
-                    <div>
-                      <h4 className="font-bold text-sm text-white">Import Validation Summary</h4>
-                      <p className="text-xs text-slate-400">File: {validationResult.fileName}</p>
-                    </div>
-
-                    <div className="flex items-center gap-3">
-                      {validationResult.errors.length === 0 && validationResult.parsedRecords.length > 0 ? (
-                        <button
-                          id="btn-commit-csv-import"
-                          onClick={handleCommitImport}
-                          disabled={isImporting}
-                          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold px-5 py-2.5 rounded-lg shadow-sm transition disabled:opacity-50"
-                        >
-                          <CheckCircle2 className="w-4 h-4" />
-                          <span>{isImporting ? 'Importing...' : 'Confirm & Commit Import'}</span>
-                        </button>
-                      ) : (
-                        <span className="text-xs text-rose-400 bg-rose-950/40 px-3 py-1.5 rounded-lg border border-rose-900/60 flex items-center gap-1.5">
-                          <AlertTriangle className="w-4 h-4" />
-                          Fix errors below before importing
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Summary Metric Cards */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 text-center">
-                      <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">Total Rows</span>
-                      <span className="text-sm font-bold text-slate-200">{validationResult.totalRows}</span>
-                    </div>
-
-                    <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 text-center">
-                      <span className="text-[10px] text-emerald-400 uppercase tracking-wider block mb-1">New To Create</span>
-                      <span className="text-sm font-bold text-emerald-400">+{validationResult.willCreateCount}</span>
-                    </div>
-
-                    <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 text-center">
-                      <span className="text-[10px] text-blue-400 uppercase tracking-wider block mb-1">To Update (Known ID)</span>
-                      <span className="text-sm font-bold text-blue-400">⟳ {validationResult.willUpdateCount}</span>
-                    </div>
-
-                    <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 text-center">
-                      <span className="text-[10px] text-rose-400 uppercase tracking-wider block mb-1">Blocking Errors</span>
-                      <span className="text-sm font-bold text-rose-400">{validationResult.errors.length}</span>
-                    </div>
-                  </div>
-
-                  {/* Errors List */}
-                  {validationResult.errors.length > 0 && (
-                    <div className="p-4 bg-rose-950/20 border border-rose-800/40 rounded-lg space-y-2">
-                      <h5 className="text-xs font-bold text-rose-300 flex items-center gap-1.5">
-                        <AlertCircle className="w-4 h-4" />
-                        Validation Errors ({validationResult.errors.length})
-                      </h5>
-                      <div className="max-h-40 overflow-y-auto space-y-1 text-xs text-rose-200">
-                        {validationResult.errors.map((err, i) => (
-                          <div key={i} className="flex items-start gap-2">
-                            <span className="font-mono text-[10px] bg-rose-900/60 px-1.5 py-0.5 rounded">Row {err.rowNumber}</span>
-                            <span>{err.message}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Warnings List */}
-                  {validationResult.warnings.length > 0 && (
-                    <div className="p-4 bg-amber-950/20 border border-amber-800/40 rounded-lg space-y-2">
-                      <h5 className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                        <HelpCircle className="w-4 h-4" />
-                        Notices / Warnings ({validationResult.warnings.length})
-                      </h5>
-                      <div className="max-h-32 overflow-y-auto space-y-1 text-xs text-amber-200">
-                        {validationResult.warnings.map((warn, i) => (
-                          <div key={i} className="flex items-start gap-2">
-                            <span className="font-mono text-[10px] bg-amber-900/60 px-1.5 py-0.5 rounded">Row {warn.rowNumber}</span>
-                            <span>{warn.message}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Parsed Preview Table */}
-                  {validationResult.parsedRecords.length > 0 && (
-                    <div>
-                      <h5 className="text-xs font-bold text-slate-300 mb-2">Valid Records Ready for Import (Preview first 10)</h5>
-                      <div className="overflow-x-auto border border-slate-800 rounded-lg">
-                        <table className="w-full text-xs text-left">
-                          <thead className="bg-slate-950 text-slate-400 text-[11px]">
-                            <tr>
-                              <th className="p-2.5">Action</th>
-                              <th className="p-2.5">Name / Title</th>
-                              <th className="p-2.5">Shop</th>
-                              <th className="p-2.5">Details</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800">
-                            {validationResult.parsedRecords.slice(0, 10).map((r, idx) => (
-                              <tr key={idx} className="hover:bg-slate-800/40">
-                                <td className="p-2.5">
-                                  <span
-                                    className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
-                                      r.isUpdate
-                                        ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                                    }`}
-                                  >
-                                    {r.isUpdate ? 'UPDATE' : 'CREATE'}
-                                  </span>
-                                </td>
-                                <td className="p-2.5 font-medium text-white">{r.name || r.title || r.username}</td>
-                                <td className="p-2.5 text-slate-300">
-                                  {r.shopName || shops.find(s => s.id === r.shopId)?.name || 'General Company'}
-                                </td>
-                                <td className="p-2.5 text-slate-400">
-                                  {r.sellingPrice !== undefined && `Price: $${r.sellingPrice} | Stock: ${r.currentStock}`}
-                                  {r.amount !== undefined && `Amount: $${r.amount} (${r.category})`}
-                                  {r.assignedShopIds && `Assigned: ${r.assignedShopIds.length} shops`}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
             </div>
           )}
 
@@ -690,9 +790,9 @@ export const AdminDataManagement: React.FC = () => {
           {csvSection === 'history' && (
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
               <div>
-                <h3 className="font-bold text-sm text-white">CSV Import Audit History</h3>
+                <h3 className="font-bold text-sm text-white">Import Audit History</h3>
                 <p className="text-xs text-slate-400 mt-1">
-                  Log of all CSV bulk uploads processed in the offline system.
+                  Log of all Excel & CSV bulk uploads processed in the offline system.
                 </p>
               </div>
 
@@ -736,7 +836,7 @@ export const AdminDataManagement: React.FC = () => {
                 </div>
               ) : (
                 <div className="p-8 text-center bg-slate-950/40 rounded-lg border border-slate-800 text-slate-400 text-xs">
-                  No CSV imports recorded yet.
+                  No imports recorded yet.
                 </div>
               )}
             </div>
@@ -799,7 +899,7 @@ export const AdminDataManagement: React.FC = () => {
                   <h3 className="font-bold text-sm text-white">Production Clean Slate (Cloudflare Deployment Prep)</h3>
                 </div>
                 <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">
-                  Permanently delete all demo and transaction records (products, sales, purchases, expenses, stock movements, debts, import history, and notifications). 
+                  Permanently delete all demo and transaction records (products, sales, purchases, expenses, stock movements, debts, import history, and notifications).
                   Your system shop units and master Administrator account will remain active and ready for live inventory entry or Cloudflare backend integration.
                 </p>
               </div>
@@ -935,7 +1035,7 @@ export const AdminDataManagement: React.FC = () => {
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold transition disabled:opacity-50"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
-              <span>Simulate Cloud Sync</span>
+              <span>Sync with Cloud</span>
             </button>
           </div>
 
