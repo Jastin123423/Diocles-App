@@ -1,7 +1,17 @@
-import React, { useState, useMemo } from 'react';
-import { Search, Receipt, Calendar, Filter, Eye, Pencil, X, CheckCircle } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import {
+  Search,
+  Receipt,
+  Calendar,
+  Eye,
+  Pencil,
+  X,
+  CheckCircle,
+  RefreshCw,
+} from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { SalesService, CartItemInput } from '../../services/salesService';
+import { SyncService } from '../../services/syncService';
 import { Sale } from '../../types';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 
@@ -11,15 +21,31 @@ export const SellerSales: React.FC = () => {
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [paymentFilter, setPaymentFilter] = useState('ALL');
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Edit Request Modal
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
   const [editItems, setEditItems] = useState<CartItemInput[]>([]);
   const [editReason, setEditReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
+
   // Track which sales have pending edit requests
   const [submittedSaleIds, setSubmittedSaleIds] = useState<Set<string>>(new Set());
+
+  // Auto-pull fresh data when this view mounts
+  useEffect(() => {
+    if (!currentUser) return;
+
+    const autoRefresh = async () => {
+      try {
+        await SyncService.processSyncQueue(currentUser);
+      } catch (err) {
+        console.log('[SellerSales] Auto-refresh failed (offline?):', err);
+      }
+    };
+
+    autoRefresh();
+  }, [currentUser?.id]);
 
   if (!currentUser) return null;
 
@@ -54,6 +80,36 @@ export const SellerSales: React.FC = () => {
 
   const totalVolume = sales.reduce((sum, s) => sum + s.total, 0);
 
+  const handleManualRefresh = async () => {
+    if (!currentUser || isRefreshing) return;
+
+    setIsRefreshing(true);
+    try {
+      const result = await SyncService.processSyncQueue(currentUser);
+      if (result.success) {
+        addToast({
+          type: 'success',
+          title: 'Refreshed',
+          description: 'Sales history updated from cloud.',
+        });
+      } else {
+        addToast({
+          type: 'warning',
+          title: 'Offline',
+          description: result.message || 'Could not reach cloud. Showing local data.',
+        });
+      }
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'Refresh Failed',
+        description: err.message || 'Could not refresh data.',
+      });
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   // Open edit request modal
   const openEditRequest = (sale: Sale) => {
     setEditingSale(sale);
@@ -82,24 +138,23 @@ export const SellerSales: React.FC = () => {
     }
 
     setIsSubmitting(true);
-    
+
     const result = SalesService.requestSaleEdit(
       editingSale.id,
       editItems,
       editReason,
       currentUser
     );
-    
+
     setIsSubmitting(false);
 
     if (result.success) {
-      // Add sale ID to submitted set
       setSubmittedSaleIds(prev => {
         const newSet = new Set(prev);
         newSet.add(editingSale.id);
         return newSet;
       });
-      
+
       addToast({
         type: 'success',
         title: 'Ombi Limesafirishwa',
@@ -128,21 +183,34 @@ export const SellerSales: React.FC = () => {
           </p>
         </div>
 
-        <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl flex items-center gap-3">
-          <div className="text-right">
-            <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block">
-              Filtered Volume
-            </span>
-            <span className="text-base font-bold text-emerald-400 font-mono">
-              {formatCurrency(totalVolume, settings.currencySymbol)}
-            </span>
-          </div>
-          <div className="h-7 w-px bg-slate-800"></div>
-          <div className="text-right">
-            <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block">
-              Transactions
-            </span>
-            <span className="text-base font-bold text-white font-mono">{sales.length}</span>
+        <div className="flex items-center gap-2">
+          {/* Refresh Button */}
+          <button
+            onClick={handleManualRefresh}
+            disabled={isRefreshing}
+            title="Refresh from cloud"
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 active:bg-slate-600 text-slate-200 text-xs font-semibold border border-slate-700 transition disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+            <span>{isRefreshing ? 'Refreshing...' : 'Refresh'}</span>
+          </button>
+
+          <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl flex items-center gap-3">
+            <div className="text-right">
+              <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block">
+                Filtered Volume
+              </span>
+              <span className="text-base font-bold text-emerald-400 font-mono">
+                {formatCurrency(totalVolume, settings.currencySymbol)}
+              </span>
+            </div>
+            <div className="h-7 w-px bg-slate-800"></div>
+            <div className="text-right">
+              <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block">
+                Transactions
+              </span>
+              <span className="text-base font-bold text-white font-mono">{sales.length}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -234,7 +302,7 @@ export const SellerSales: React.FC = () => {
                 sales.map(sale => {
                   const isVoided = sale.status === 'VOIDED';
                   const hasPendingRequest = pendingSaleIds.has(sale.id);
-                  
+
                   return (
                     <tr key={sale.id} className={`hover:bg-slate-850/60 transition ${isVoided ? 'opacity-65' : ''}`}>
                       <td className="py-3.5 px-4 font-mono font-bold text-white">
