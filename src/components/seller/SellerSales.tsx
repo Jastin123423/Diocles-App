@@ -38,7 +38,8 @@ export const SellerSales: React.FC = () => {
 
     const autoRefresh = async () => {
       try {
-        await SyncService.processSyncQueue(currentUser);
+        // FORCE PULL on mount so we always get latest approvals
+        await SyncService.processSyncQueue(currentUser, true);
       } catch (err) {
         console.log('[SellerSales] Auto-refresh failed (offline?):', err);
       }
@@ -85,7 +86,8 @@ export const SellerSales: React.FC = () => {
 
     setIsRefreshing(true);
     try {
-      const result = await SyncService.processSyncQueue(currentUser);
+      // FORCE PULL — always fetch from cloud when user clicks Refresh
+      const result = await SyncService.processSyncQueue(currentUser, true);
       if (result.success) {
         addToast({
           type: 'success',
