@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Search,
   Plus,
@@ -7,23 +7,20 @@ import {
   Power,
   X,
   AlertCircle,
-  Filter,
   CheckCircle,
-  TrendingUp,
   Store,
   Tag,
-  Layers,
   FolderTree,
   Check,
   Trash2,
+  ChevronDown,
+  ChevronRight,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ProductService } from '../../services/productService';
 import { CategoryService } from '../../services/categoryService';
-import { db } from '../../db/storage';
 import { Product, Category, ProductImage } from '../../types';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
-import { formatPriceInput, parsePriceInput, formatNumberWithCommas } from '../../utils/priceInput';
 import { ProductThumbnail } from '../common/ProductThumbnail';
 import { ProductImageViewerModal } from '../common/ProductImageViewerModal';
 import { ProductImageUpload } from '../common/ProductImageUpload';
@@ -37,6 +34,9 @@ export const AdminProducts: React.FC = () => {
   const [shopFilter, setShopFilter] = useState('ALL');
   const [categoryShopFilter, setCategoryShopFilter] = useState('ALL');
   const [refreshKey, setRefreshKey] = useState(0);
+
+  // Collapse state for shop groups (default: all expanded)
+  const [collapsedShops, setCollapsedShops] = useState<Set<string>>(new Set());
 
   // Add / Edit Product Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -70,7 +70,6 @@ export const AdminProducts: React.FC = () => {
   const [catColorInput, setCatColorInput] = useState('#3b82f6');
   const [catModalError, setCatModalError] = useState('');
 
-  // Permission check: Admin OR Seller with canEditProducts/canDeleteProducts
   if (!currentUser) return null;
   if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canEditProducts && !currentUser.permissions?.canDeleteProducts) return null;
 
@@ -78,14 +77,12 @@ export const AdminProducts: React.FC = () => {
   const categories = dbState.categories || [];
   const shops = dbState.shops || [];
 
-  // Filtered categories for product filtering dropdown based on selected shopFilter
   const availableFilterCategories = shopFilter === 'ALL'
     ? categories
     : categories.filter(c => c.shopId === shopFilter);
 
-  // Get products directly from dbState (which updates on db changes)
   const allProducts = dbState.products || [];
-  
+
   const products = allProducts.filter(p => {
     if (shopFilter !== 'ALL' && p.shopId !== shopFilter) return false;
     if (categoryFilter !== 'ALL' && p.categoryId !== categoryFilter) return false;
@@ -96,6 +93,29 @@ export const AdminProducts: React.FC = () => {
     }
     return true;
   });
+
+  // ==============================
+  // GROUP PRODUCTS BY SHOP
+  // ==============================
+  const groupedByShop = shops
+    .map(shop => ({
+      shop,
+      products: products.filter(p => p.shopId === shop.id),
+    }))
+    .filter(group => group.products.length > 0);
+
+  const productsWithNoShop = products.filter(
+    p => !shops.some(s => s.id === p.shopId)
+  );
+
+  const toggleShopCollapse = (shopId: string) => {
+    setCollapsedShops(prev => {
+      const next = new Set(prev);
+      if (next.has(shopId)) next.delete(shopId);
+      else next.add(shopId);
+      return next;
+    });
+  };
 
   const openAddModal = () => {
     setEditingProduct(null);
@@ -159,7 +179,6 @@ export const AdminProducts: React.FC = () => {
       return;
     }
 
-    // Parse price values
     const sPrice = parseFloat(sellingPrice) || 0;
     const pPrice = parseFloat(purchasePrice) || 0;
 
@@ -171,7 +190,7 @@ export const AdminProducts: React.FC = () => {
 
     try {
       let result;
-      
+
       if (editingProduct) {
         result = await ProductService.updateProduct(
           editingProduct.id,
@@ -304,11 +323,7 @@ export const AdminProducts: React.FC = () => {
         currentUser
       );
       if (res.success) {
-        addToast({
-          type: 'success',
-          title: 'Category Updated',
-          description: `Category '${catNameInput}' updated.`,
-        });
+        addToast({ type: 'success', title: 'Category Updated', description: `Category '${catNameInput}' updated.` });
         setIsCategoryModalOpen(false);
         setRefreshKey(prev => prev + 1);
       } else {
@@ -320,11 +335,7 @@ export const AdminProducts: React.FC = () => {
         currentUser
       );
       if (res.success) {
-        addToast({
-          type: 'success',
-          title: 'Category Created',
-          description: `New category '${catNameInput}' created.`,
-        });
+        addToast({ type: 'success', title: 'Category Created', description: `New category '${catNameInput}' created.` });
         setIsCategoryModalOpen(false);
         setRefreshKey(prev => prev + 1);
       } else {
@@ -343,6 +354,124 @@ export const AdminProducts: React.FC = () => {
         description: `Category '${cat.name}' is now ${cat.status === 'INACTIVE' ? 'Active' : 'Inactive'}.`,
       });
     }
+  };
+
+  // ==============================
+  // PRODUCT ROW RENDERER (shared by desktop table)
+  // ==============================
+  const renderProductRow = (product: Product) => {
+    const cat = categories.find(c => c.id === product.categoryId);
+    const shop = shops.find(s => s.id === product.shopId);
+    const isLow = product.currentStock <= product.minStock;
+    const proposedPrice = product.proposedSellingPrice || product.sellingPrice;
+    const marginPct = proposedPrice > 0
+      ? (((proposedPrice - product.purchasePrice) / proposedPrice) * 100).toFixed(1)
+      : '0';
+
+    return (
+      <tr
+        key={product.id}
+        className={`hover:bg-slate-850/60 transition ${
+          product.status === 'INACTIVE' ? 'opacity-50 bg-slate-950/40' : ''
+        }`}
+      >
+        <td className="py-3.5 px-4 font-semibold text-white">
+          <div className="flex items-center gap-3">
+            <ProductThumbnail
+              product={product}
+              size="md"
+              onClick={() => {
+                setViewingProduct(product);
+                setIsViewerOpen(true);
+              }}
+            />
+            <div className="min-w-0">
+              <div className="truncate font-semibold">{product.name}</div>
+              {product.status === 'INACTIVE' && (
+                <span className="text-[10px] font-normal text-rose-400 bg-rose-500/10 px-1.5 py-0.2 rounded border border-rose-500/20">
+                  Deactivated / Hidden from POS
+                </span>
+              )}
+            </div>
+          </div>
+        </td>
+        <td className="py-3.5 px-4 font-mono text-slate-400">
+          <div>{product.sku}</div>
+          <div className="text-[10px] text-slate-500">{product.barcode}</div>
+        </td>
+        <td className="py-3.5 px-4 text-slate-300">
+          <span className="px-2 py-0.5 rounded-full bg-slate-800 text-[10px] font-medium border border-slate-700/60">
+            {cat?.name || 'General'}
+          </span>
+        </td>
+        <td className="py-3.5 px-4 text-right font-mono text-slate-400">
+          {formatCurrency(product.purchasePrice, settings.currencySymbol)}
+        </td>
+        <td className="py-3.5 px-4 text-right font-mono font-bold text-white">
+          {formatCurrency(proposedPrice, settings.currencySymbol)}
+        </td>
+        <td className="py-3.5 px-4 text-right font-mono text-emerald-400 font-semibold">
+          {marginPct}%
+        </td>
+        <td className="py-3.5 px-4 text-center">
+          <span
+            className={`font-mono font-bold px-2 py-0.5 rounded text-[11px] ${
+              product.currentStock <= 0
+                ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                : isLow
+                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                : 'bg-emerald-500/15 text-emerald-300'
+            }`}
+          >
+            {product.currentStock} {product.unit}
+          </span>
+        </td>
+        <td className="py-3.5 px-4 text-center">
+          <span
+            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+              product.status === 'ACTIVE'
+                ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'
+                : 'bg-rose-500/15 text-rose-400 border border-rose-500/20'
+            }`}
+          >
+            {product.status}
+          </span>
+        </td>
+        <td className="py-3.5 px-4 text-right space-x-2">
+          {(currentUser.role === 'ADMIN' || currentUser.permissions?.canEditProducts) && (
+            <>
+              <button
+                onClick={() => openEditModal(product)}
+                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
+                title="Edit product"
+              >
+                <Edit className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={() => handleToggleStatus(product)}
+                className={`p-1.5 rounded-lg transition ${
+                  product.status === 'ACTIVE'
+                    ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400'
+                    : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400'
+                }`}
+                title={product.status === 'ACTIVE' ? 'Deactivate Product' : 'Activate Product'}
+              >
+                <Power className="w-3.5 h-3.5" />
+              </button>
+            </>
+          )}
+          {(currentUser.role === 'ADMIN' || currentUser.permissions?.canDeleteProducts) && (
+            <button
+              onClick={() => setDeletingProduct(product)}
+              className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition"
+              title="Delete product"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </td>
+      </tr>
+    );
   };
 
   return (
@@ -460,157 +589,273 @@ export const AdminProducts: React.FC = () => {
             </div>
           </div>
 
-          {/* Products Table */}
-          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="border-b border-slate-800 bg-slate-950/60 text-slate-400">
-                    <th className="py-3 px-4 font-semibold">Product Name</th>
-                    <th className="py-3 px-4 font-semibold">Shop / Unit</th>
-                    <th className="py-3 px-4 font-semibold">SKU / Barcode</th>
-                    <th className="py-3 px-4 font-semibold">Category</th>
-                    <th className="py-3 px-4 text-right font-semibold">Purchase Price</th>
-                    <th className="py-3 px-4 text-right font-semibold">Proposed Price</th>
-                    <th className="py-3 px-4 text-right font-semibold">Est Margin</th>
-                    <th className="py-3 px-4 text-center font-semibold">Stock</th>
-                    <th className="py-3 px-4 text-center font-semibold">Status</th>
-                    <th className="py-3 px-4 text-right font-semibold">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60">
-                  {products.length === 0 ? (
-                    <tr>
-                      <td colSpan={10} className="py-10 text-center text-slate-500">
-                        <Package className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                        <p>No products match your criteria. {shops.length === 0 ? 'Create a shop first!' : ''}</p>
-                      </td>
-                    </tr>
-                  ) : (
-                    products.map(product => {
-                      const cat = categories.find(c => c.id === product.categoryId);
-                      const shop = shops.find(s => s.id === product.shopId);
-                      const isLow = product.currentStock <= product.minStock;
-                      const proposedPrice = product.proposedSellingPrice || product.sellingPrice;
-                      const marginPct = proposedPrice > 0
-                        ? (((proposedPrice - product.purchasePrice) / proposedPrice) * 100).toFixed(1)
-                        : '0';
+          {/* ==============================
+              GROUPED BY SHOP VIEW
+          ============================== */}
+          {products.length === 0 ? (
+            <div className="bg-slate-900 border border-slate-800 rounded-xl py-16 text-center text-slate-500">
+              <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
+              <p className="text-sm">No products match your criteria.</p>
+              {shops.length === 0 && (
+                <p className="text-xs mt-2 text-slate-400">Create a shop first!</p>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {groupedByShop.map(({ shop, products: shopProducts }) => {
+                const isCollapsed = collapsedShops.has(shop.id);
+                const activeCount = shopProducts.filter(p => p.status === 'ACTIVE').length;
+                const lowStockCount = shopProducts.filter(
+                  p => p.status === 'ACTIVE' && p.currentStock <= p.minStock
+                ).length;
 
-                      return (
-                        <tr
-                          key={product.id}
-                          className={`hover:bg-slate-850/60 transition ${
-                            product.status === 'INACTIVE' ? 'opacity-50 bg-slate-950/40' : ''
-                          }`}
-                        >
-                          <td className="py-3.5 px-4 font-semibold text-white">
-                            <div className="flex items-center gap-3">
-                              <ProductThumbnail
-                                product={product}
-                                size="md"
-                                onClick={() => {
-                                  setViewingProduct(product);
-                                  setIsViewerOpen(true);
-                                }}
-                              />
-                              <div className="min-w-0">
-                                <div className="truncate font-semibold">{product.name}</div>
-                                {product.status === 'INACTIVE' && (
-                                  <span className="text-[10px] font-normal text-rose-400 bg-rose-500/10 px-1.5 py-0.2 rounded border border-rose-500/20">
-                                    Deactivated / Hidden from POS
-                                  </span>
-                                )}
+                return (
+                  <div
+                    key={shop.id}
+                    className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-lg"
+                  >
+                    {/* Shop Header */}
+                    <button
+                      onClick={() => toggleShopCollapse(shop.id)}
+                      className="w-full flex items-center justify-between gap-3 px-5 py-4 bg-slate-900/80 hover:bg-slate-800/60 active:bg-slate-800 transition border-b border-slate-800"
+                    >
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center shrink-0">
+                          <Store className="w-5 h-5" />
+                        </div>
+                        <div className="min-w-0 text-left">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="text-base font-bold text-white truncate">
+                              {shop.name}
+                            </h3>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                              {shop.code || 'UNIT'}
+                            </span>
+                            {shop.status === 'INACTIVE' && (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/15 text-rose-300 border border-rose-500/20">
+                                Shop Inactive
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            {shopProducts.length}{' '}
+                            {shopProducts.length === 1 ? 'product' : 'products'} •{' '}
+                            {activeCount} active
+                            {lowStockCount > 0 && (
+                              <span className="text-amber-400 ml-1">
+                                • {lowStockCount} low stock
+                              </span>
+                            )}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        {lowStockCount > 0 && (
+                          <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 text-[10px] font-bold border border-amber-500/30">
+                            ⚠ {lowStockCount} Low
+                          </span>
+                        )}
+                        {isCollapsed ? (
+                          <ChevronRight className="w-5 h-5 text-slate-400" />
+                        ) : (
+                          <ChevronDown className="w-5 h-5 text-slate-400" />
+                        )}
+                      </div>
+                    </button>
+
+                    {/* Products Table - Desktop */}
+                    {!isCollapsed && (
+                      <div className="hidden md:block overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead>
+                            <tr className="border-b border-slate-800 bg-slate-950/60 text-slate-400">
+                              <th className="py-3 px-4 font-semibold">Product Name</th>
+                              <th className="py-3 px-4 font-semibold">SKU / Barcode</th>
+                              <th className="py-3 px-4 font-semibold">Category</th>
+                              <th className="py-3 px-4 text-right font-semibold">Purchase</th>
+                              <th className="py-3 px-4 text-right font-semibold">Selling</th>
+                              <th className="py-3 px-4 text-right font-semibold">Margin</th>
+                              <th className="py-3 px-4 text-center font-semibold">Stock</th>
+                              <th className="py-3 px-4 text-center font-semibold">Status</th>
+                              <th className="py-3 px-4 text-right font-semibold">Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/60">
+                            {shopProducts.map(renderProductRow)}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {/* Products Cards - Mobile */}
+                    {!isCollapsed && (
+                      <div className="md:hidden divide-y divide-slate-800/60">
+                        {shopProducts.map(product => {
+                          const cat = categories.find(c => c.id === product.categoryId);
+                          const isLow = product.currentStock <= product.minStock;
+                          const proposedPrice = product.proposedSellingPrice || product.sellingPrice;
+                          const marginPct =
+                            proposedPrice > 0
+                              ? (((proposedPrice - product.purchasePrice) / proposedPrice) * 100).toFixed(1)
+                              : '0';
+
+                          return (
+                            <div
+                              key={product.id}
+                              className={`p-3.5 space-y-2.5 ${
+                                product.status === 'INACTIVE' ? 'opacity-55' : ''
+                              }`}
+                            >
+                              <div className="flex items-start gap-3">
+                                <ProductThumbnail
+                                  product={product}
+                                  size="md"
+                                  onClick={() => {
+                                    setViewingProduct(product);
+                                    setIsViewerOpen(true);
+                                  }}
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <h4 className="font-bold text-xs text-white truncate">
+                                      {product.name}
+                                    </h4>
+                                    <span
+                                      className={`px-1.5 py-0.2 rounded text-[9px] font-bold shrink-0 ${
+                                        product.status === 'ACTIVE'
+                                          ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'
+                                          : 'bg-rose-500/15 text-rose-400 border border-rose-500/20'
+                                      }`}
+                                    >
+                                      {product.status}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 flex-wrap mt-1 text-[10px]">
+                                    <span className="px-1.5 py-0.2 rounded bg-slate-800 text-slate-300">
+                                      {cat?.name || 'General'}
+                                    </span>
+                                    {product.sku && (
+                                      <span className="font-mono text-slate-400">SKU: {product.sku}</span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-3 gap-2 text-center text-xs py-1">
+                                <div className="bg-slate-950/60 p-1.5 rounded-lg border border-slate-800">
+                                  <div className="text-[9px] text-slate-400">Buying</div>
+                                  <div className="font-mono text-[11px] text-slate-400">
+                                    {formatCurrency(product.purchasePrice, settings.currencySymbol)}
+                                  </div>
+                                </div>
+                                <div className="bg-slate-950/60 p-1.5 rounded-lg border border-slate-800">
+                                  <div className="text-[9px] text-slate-400">Selling</div>
+                                  <div className="font-mono text-[11px] font-bold text-white">
+                                    {formatCurrency(proposedPrice, settings.currencySymbol)}
+                                  </div>
+                                </div>
+                                <div className="bg-slate-950/60 p-1.5 rounded-lg border border-slate-800">
+                                  <div className="text-[9px] text-slate-400">Stock</div>
+                                  <div
+                                    className={`font-mono text-[11px] font-bold ${
+                                      product.currentStock <= 0
+                                        ? 'text-rose-400'
+                                        : isLow
+                                        ? 'text-amber-300'
+                                        : 'text-emerald-400'
+                                    }`}
+                                  >
+                                    {product.currentStock} {product.unit}
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 text-xs">
+                                <div className="text-[11px] text-emerald-400 font-mono">
+                                  Margin: <strong>{marginPct}%</strong>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                  {(currentUser.role === 'ADMIN' || currentUser.permissions?.canEditProducts) && (
+                                    <>
+                                      <button
+                                        onClick={() => openEditModal(product)}
+                                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1 transition"
+                                      >
+                                        <Edit className="w-3.5 h-3.5" />
+                                        <span>Edit</span>
+                                      </button>
+                                      <button
+                                        onClick={() => handleToggleStatus(product)}
+                                        className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition ${
+                                          product.status === 'ACTIVE'
+                                            ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20'
+                                            : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20'
+                                        }`}
+                                      >
+                                        <Power className="w-3.5 h-3.5" />
+                                        <span>{product.status === 'ACTIVE' ? 'Off' : 'On'}</span>
+                                      </button>
+                                    </>
+                                  )}
+                                  {(currentUser.role === 'ADMIN' || currentUser.permissions?.canDeleteProducts) && (
+                                    <button
+                                      onClick={() => setDeletingProduct(product)}
+                                      className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition"
+                                      title="Delete product"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             </div>
-                          </td>
-                          <td className="py-3.5 px-4 text-slate-300">
-                            <span className="px-2 py-0.5 rounded bg-blue-950/70 text-blue-300 border border-blue-800/50 text-[10px] font-semibold">
-                              {shop?.name || 'Main Shop'}
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-4 font-mono text-slate-400">
-                            <div>{product.sku}</div>
-                            <div className="text-[10px] text-slate-500">{product.barcode}</div>
-                          </td>
-                          <td className="py-3.5 px-4 text-slate-300">
-                            <span className="px-2 py-0.5 rounded-full bg-slate-800 text-[10px] font-medium border border-slate-700/60">
-                              {cat?.name || 'General'}
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-4 text-right font-mono text-slate-400">
-                            {formatCurrency(product.purchasePrice, settings.currencySymbol)}
-                          </td>
-                          <td className="py-3.5 px-4 text-right font-mono font-bold text-white">
-                            {formatCurrency(proposedPrice, settings.currencySymbol)}
-                          </td>
-                          <td className="py-3.5 px-4 text-right font-mono text-emerald-400 font-semibold">
-                            {marginPct}%
-                          </td>
-                          <td className="py-3.5 px-4 text-center">
-                            <span
-                              className={`font-mono font-bold px-2 py-0.5 rounded text-[11px] ${
-                                product.currentStock <= 0
-                                  ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
-                                  : isLow
-                                  ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                                  : 'bg-emerald-500/15 text-emerald-300'
-                              }`}
-                            >
-                              {product.currentStock} {product.unit}
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-4 text-center">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                product.status === 'ACTIVE'
-                                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/20'
-                                  : 'bg-rose-500/15 text-rose-400 border border-rose-500/20'
-                              }`}
-                            >
-                              {product.status}
-                            </span>
-                          </td>
-                          <td className="py-3.5 px-4 text-right space-x-2">
-                            {currentUser.permissions?.canEditProducts && (
-                              <>
-                                <button
-                                  onClick={() => openEditModal(product)}
-                                  className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 transition"
-                                  title="Edit product"
-                                >
-                                  <Edit className="w-3.5 h-3.5" />
-                                </button>
-                                <button
-                                  onClick={() => handleToggleStatus(product)}
-                                  className={`p-1.5 rounded-lg transition ${
-                                    product.status === 'ACTIVE'
-                                      ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400'
-                                      : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400'
-                                  }`}
-                                  title={product.status === 'ACTIVE' ? 'Deactivate Product' : 'Activate Product'}
-                                >
-                                  <Power className="w-3.5 h-3.5" />
-                                </button>
-                              </>
-                            )}
-                            {currentUser.permissions?.canDeleteProducts && (
-                              <button
-                                onClick={() => setDeletingProduct(product)}
-                                className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition"
-                                title="Delete product"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </td>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Products without a valid shop */}
+              {productsWithNoShop.length > 0 && (
+                <div className="bg-slate-900 border border-amber-800/40 rounded-2xl overflow-hidden shadow-lg">
+                  <div className="flex items-center gap-3 px-5 py-4 bg-amber-950/20 border-b border-amber-800/40">
+                    <AlertCircle className="w-5 h-5 text-amber-400" />
+                    <div>
+                      <h3 className="text-base font-bold text-white">
+                        Unassigned Products
+                      </h3>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {productsWithNoShop.length} products have an invalid shop
+                      </p>
+                    </div>
+                  </div>
+                  <div className="hidden md:block overflow-x-auto">
+                    <table className="w-full text-left text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-800 bg-slate-950/60 text-slate-400">
+                          <th className="py-3 px-4 font-semibold">Product Name</th>
+                          <th className="py-3 px-4 font-semibold">SKU / Barcode</th>
+                          <th className="py-3 px-4 font-semibold">Category</th>
+                          <th className="py-3 px-4 text-right font-semibold">Purchase</th>
+                          <th className="py-3 px-4 text-right font-semibold">Selling</th>
+                          <th className="py-3 px-4 text-right font-semibold">Margin</th>
+                          <th className="py-3 px-4 text-center font-semibold">Stock</th>
+                          <th className="py-3 px-4 text-center font-semibold">Status</th>
+                          <th className="py-3 px-4 text-right font-semibold">Actions</th>
                         </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800/60">
+                        {productsWithNoShop.map(renderProductRow)}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
+          )}
         </>
       )}
 
@@ -628,7 +873,7 @@ export const AdminProducts: React.FC = () => {
               </p>
             </div>
 
-            {currentUser.permissions?.canEditProducts && (
+            {(currentUser.role === 'ADMIN' || currentUser.permissions?.canEditProducts) && (
               <button
                 onClick={() => openAddCategoryModal()}
                 className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition shadow-sm"
@@ -639,7 +884,6 @@ export const AdminProducts: React.FC = () => {
             )}
           </div>
 
-          {/* Categories List */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
             {categories.length === 0 ? (
               <div className="col-span-full p-8 text-center bg-slate-900 border border-slate-800 rounded-xl text-slate-500">
@@ -673,7 +917,7 @@ export const AdminProducts: React.FC = () => {
                         {isActive ? 'Active' : 'Inactive'}
                       </span>
                     </div>
-                    {currentUser.permissions?.canEditProducts && (
+                    {(currentUser.role === 'ADMIN' || currentUser.permissions?.canEditProducts) && (
                       <div className="flex gap-2">
                         <button onClick={() => openEditCategoryModal(cat)} className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-xs">Edit</button>
                         <button onClick={() => handleToggleCategoryStatus(cat)} className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-xs">Toggle</button>
@@ -753,7 +997,6 @@ export const AdminProducts: React.FC = () => {
             )}
 
             <form onSubmit={handleSaveProduct} className="space-y-4 text-xs">
-              {/* 1. Assigned Shop */}
               <div>
                 <label className="block text-slate-300 font-medium mb-1">Assigned Shop / Unit *</label>
                 <select
@@ -771,7 +1014,6 @@ export const AdminProducts: React.FC = () => {
                 )}
               </div>
 
-              {/* 2. Product Title */}
               <div>
                 <label className="block text-slate-300 font-medium mb-1">Product Title *</label>
                 <input
@@ -784,7 +1026,6 @@ export const AdminProducts: React.FC = () => {
                 />
               </div>
 
-              {/* 3. Purchasing Price & Selling Price */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">Purchasing Price</label>
@@ -814,7 +1055,6 @@ export const AdminProducts: React.FC = () => {
                 </div>
               </div>
 
-              {/* 4. Initial Stock & Min Threshold */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">
@@ -843,12 +1083,11 @@ export const AdminProducts: React.FC = () => {
                 </div>
               </div>
 
-              {/* 5. Category & Unit */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="block text-slate-300 font-medium">Category *</label>
-                    {currentUser.permissions?.canEditProducts && (
+                    {(currentUser.role === 'ADMIN' || currentUser.permissions?.canEditProducts) && (
                       <button
                         type="button"
                         onClick={() => openAddCategoryModal(productShopId)}
@@ -900,7 +1139,6 @@ export const AdminProducts: React.FC = () => {
                 </div>
               </div>
 
-              {/* 6. SKU & Barcode */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-slate-300 font-medium mb-1">SKU / Code</label>
@@ -925,7 +1163,6 @@ export const AdminProducts: React.FC = () => {
                 </div>
               </div>
 
-              {/* 7. Product Images */}
               <div className="pt-2 border-t border-slate-800/80">
                 <ProductImageUpload
                   images={productImages}
@@ -934,7 +1171,6 @@ export const AdminProducts: React.FC = () => {
                 />
               </div>
 
-              {/* 8. Buttons */}
               <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
                 <button
                   type="button"
