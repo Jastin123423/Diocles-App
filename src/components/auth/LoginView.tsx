@@ -7,9 +7,12 @@ import {
   ArrowRight,
   Lock,
   Boxes,
+  RefreshCw,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { AuthService } from '../../services/authService';
+import { CloudflareApi } from '../../services/cloudflareApi';
+import { SyncService } from '../../services/syncService';
 import { UserRole } from '../../types';
 
 export const LoginView: React.FC = () => {
@@ -20,12 +23,45 @@ export const LoginView: React.FC = () => {
   const [rememberMe, setRememberMe] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [statusMsg, setStatusMsg] = useState('');
 
   const settings = dbState.settings;
+
+  /**
+   * Pull fresh users + shops from cloud.
+   * Only used when local lookup fails (new user from another device).
+   */
+  const pullFreshAccountsFromCloud = async (): Promise<boolean> => {
+    try {
+      const online = await CloudflareApi.checkConnection();
+      if (!online) {
+        console.log('[LoginView] Offline — skipping cloud account refresh');
+        return false;
+      }
+
+      setStatusMsg('Checking for latest accounts...');
+      const pullResult = await CloudflareApi.pullSync();
+
+      if (pullResult.success && pullResult.data) {
+        SyncService.applyCloudData(pullResult.data);
+        console.log('[LoginView] Cloud accounts pulled successfully');
+        setStatusMsg('');
+        return true;
+      }
+
+      setStatusMsg('');
+      return false;
+    } catch (err) {
+      console.log('[LoginView] Cloud account refresh failed:', err);
+      setStatusMsg('');
+      return false;
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
+    setStatusMsg('');
 
     if (!username.trim()) {
       setErrorMsg('Please enter your username or account ID.');
@@ -39,23 +75,58 @@ export const LoginView: React.FC = () => {
 
     setIsLoading(true);
     try {
+      // ==========================================
+      // STEP 1: Try local login (fast, offline-capable)
+      // ==========================================
       const result = await AuthService.login(username, password, activePortal);
+
       if (result.success && result.user) {
-        // Save remember me preference
-        if (rememberMe) {
-          AuthService.setRememberMe(result.user);
-        } else {
-          AuthService.clearRememberMe();
-        }
-        
+        if (rememberMe) AuthService.setRememberMe(result.user);
+        else AuthService.clearRememberMe();
         login(result.user);
-      } else {
-        setErrorMsg(result.error || 'Authentication failed. Please verify credentials.');
+        return;
       }
+
+      // ==========================================
+      // STEP 2: If user not found locally, refresh from cloud
+      // ==========================================
+      const isUserNotFoundError =
+        result.error?.toLowerCase().includes('account not found') ||
+        result.error?.toLowerCase().includes('not found');
+
+      if (isUserNotFoundError) {
+        console.log('[LoginView] User not found locally — pulling from cloud...');
+        const refreshed = await pullFreshAccountsFromCloud();
+
+        if (refreshed) {
+          // Retry login with fresh local data
+          const retryResult = await AuthService.login(username, password, activePortal);
+
+          if (retryResult.success && retryResult.user) {
+            if (rememberMe) AuthService.setRememberMe(retryResult.user);
+            else AuthService.clearRememberMe();
+            login(retryResult.user);
+            return;
+          }
+
+          // Still failing after refresh
+          setErrorMsg(retryResult.error || 'Authentication failed. Please verify credentials.');
+        } else {
+          // Couldn't refresh (offline or error)
+          setErrorMsg(
+            result.error || 'Account not found locally. Connect to internet to check for new accounts.'
+          );
+        }
+        return;
+      }
+
+      // Any other error (wrong password, inactive, etc.)
+      setErrorMsg(result.error || 'Authentication failed. Please verify credentials.');
     } catch (err: any) {
       setErrorMsg(err.message || 'An unexpected error occurred.');
     } finally {
       setIsLoading(false);
+      setStatusMsg('');
     }
   };
 
@@ -124,6 +195,14 @@ export const LoginView: React.FC = () => {
                 <span>Admin Login</span>
               </button>
             </div>
+
+            {/* Status message (checking cloud) */}
+            {statusMsg && (
+              <div className="mb-4 p-3 rounded-lg bg-blue-500/10 border border-blue-500/30 text-blue-300 text-xs flex items-center gap-2">
+                <RefreshCw className="w-4 h-4 shrink-0 animate-spin" />
+                <span>{statusMsg}</span>
+              </div>
+            )}
 
             {/* Error banner */}
             {errorMsg && (
@@ -194,7 +273,10 @@ export const LoginView: React.FC = () => {
                 } disabled:opacity-50`}
               >
                 {isLoading ? (
-                  <span>Authenticating...</span>
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>Authenticating...</span>
+                  </>
                 ) : (
                   <>
                     <span>Sign In to {activePortal === 'ADMIN' ? 'Admin Portal' : 'POS Register'}</span>
