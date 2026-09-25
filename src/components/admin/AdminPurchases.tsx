@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   Truck,
   Plus,
@@ -11,6 +11,9 @@ import {
   AlertCircle,
   FileText,
   Pencil,
+  Package,
+  Check,
+  ChevronDown,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { PurchaseService } from '../../services/purchaseService';
@@ -23,6 +26,222 @@ interface PurchaseItemInput {
   unitCost: number | string;
 }
 
+// ─────────────────────────────────────────────────────────────
+// Inline ProductSearchSelect — used per line-item row
+// ─────────────────────────────────────────────────────────────
+interface ProductLike {
+  id: string;
+  name: string;
+  sku: string;
+  currentStock: number;
+  unit: string;
+  purchasePrice?: number;
+  sellingPrice?: number;
+}
+
+const ProductSearchSelect: React.FC<{
+  products: ProductLike[];
+  value: string;
+  onChange: (productId: string) => void;
+  currencySymbol?: string;
+  placeholder?: string;
+}> = ({ products, value, onChange, currencySymbol = 'TSh', placeholder = 'Search name or SKU...' }) => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [highlightIdx, setHighlightIdx] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const selectedProduct = useMemo(
+    () => products.find(p => p.id === value),
+    [products, value]
+  );
+
+  // Filter — multi-token, name + SKU, capped at 100 for perf
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return products.slice(0, 50);
+    const tokens = q.split(/\s+/);
+    return products
+      .filter(p => {
+        const hay = `${p.name} ${p.sku}`.toLowerCase();
+        return tokens.every(t => hay.includes(t));
+      })
+      .slice(0, 100);
+  }, [products, query]);
+
+  useEffect(() => { setHighlightIdx(0); }, [query, isOpen]);
+
+  // Scroll highlighted into view
+  useEffect(() => {
+    if (!isOpen || !listRef.current) return;
+    const el = listRef.current.querySelector(`[data-idx="${highlightIdx}"]`) as HTMLElement | null;
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [highlightIdx, isOpen]);
+
+  // Outside click
+  useEffect(() => {
+    if (!isOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setIsOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [isOpen]);
+
+  // Autofocus search input on open
+  useEffect(() => {
+    if (isOpen) setTimeout(() => inputRef.current?.focus(), 30);
+    else setQuery('');
+  }, [isOpen]);
+
+  const handleSelect = (productId: string) => {
+    onChange(productId);
+    setIsOpen(false);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightIdx(i => Math.min(i + 1, filtered.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightIdx(i => Math.max(i - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (filtered[highlightIdx]) handleSelect(filtered[highlightIdx].id);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsOpen(false);
+    }
+  };
+
+  return (
+    <div ref={containerRef} className="relative">
+      {/* Trigger button (mimics a select) */}
+      <button
+        type="button"
+        onClick={() => setIsOpen(o => !o)}
+        className={`w-full flex items-center justify-between gap-2 bg-slate-900 border rounded-lg px-2.5 py-1.5 text-left text-xs transition ${
+          isOpen ? 'border-blue-500 ring-1 ring-blue-500/30' : 'border-slate-800 hover:border-slate-700'
+        }`}
+      >
+        <span className="flex items-center gap-2 min-w-0 flex-1">
+          <Package className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+          {selectedProduct ? (
+            <span className="min-w-0">
+              <span className="block text-white font-medium truncate leading-tight">
+                {selectedProduct.name}
+              </span>
+              <span className="block text-[10px] text-slate-500 font-mono leading-tight mt-0.5">
+                {selectedProduct.sku} • Stock: {selectedProduct.currentStock} {selectedProduct.unit}
+              </span>
+            </span>
+          ) : (
+            <span className="text-slate-500 truncate">Select a product...</span>
+          )}
+        </span>
+        <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
+      </button>
+
+      {/* Dropdown */}
+      {isOpen && (
+        <div
+          className="absolute z-50 mt-1 left-0 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl w-[440px] max-w-[calc(100vw-4rem)] max-h-80 flex flex-col animate-in fade-in slide-in-from-top-1"
+        >
+          {/* Search input */}
+          <div className="p-2.5 border-b border-slate-800">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                ref={inputRef}
+                type="text"
+                value={query}
+                onChange={e => setQuery(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder={placeholder}
+                className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-8 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              />
+              {query && (
+                <button
+                  type="button"
+                  onClick={() => setQuery('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-white p-0.5"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+            <p className="text-[10px] text-slate-500 mt-1.5">
+              {query
+                ? `${filtered.length} match${filtered.length === 1 ? '' : 'es'}`
+                : `Showing first ${filtered.length} of ${products.length} — type to search`}
+            </p>
+          </div>
+
+          {/* Results */}
+          <div ref={listRef} className="overflow-y-auto flex-1">
+            {filtered.length === 0 ? (
+              <div className="p-6 text-center">
+                <Package className="w-7 h-7 mx-auto text-slate-600 mb-2" />
+                <p className="text-xs text-slate-500">No products match "{query}"</p>
+                <p className="text-[10px] text-slate-600 mt-1">Try a shorter search or check the SKU</p>
+              </div>
+            ) : (
+              filtered.map((p, idx) => {
+                const isSelected = p.id === value;
+                const isHighlighted = idx === highlightIdx;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    data-idx={idx}
+                    onMouseEnter={() => setHighlightIdx(idx)}
+                    onClick={() => handleSelect(p.id)}
+                    className={`w-full text-left px-3 py-2 border-b border-slate-800/40 last:border-b-0 transition flex items-center gap-2 ${
+                      isHighlighted ? 'bg-slate-800/60' : 'hover:bg-slate-800/40'
+                    }`}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-medium text-white truncate">{p.name}</span>
+                        {isSelected && <Check className="w-3 h-3 text-blue-400 shrink-0" />}
+                      </div>
+                      <div className="flex items-center gap-3 mt-0.5 text-[10px] text-slate-500 font-mono">
+                        <span>{p.sku}</span>
+                        <span className={p.currentStock <= 0 ? 'text-rose-400' : ''}>
+                          Stock: {p.currentStock} {p.unit}
+                        </span>
+                        {p.purchasePrice !== undefined && p.purchasePrice !== null && (
+                          <span className="text-amber-400/80">
+                            Cost: {formatCurrency(p.purchasePrice, currencySymbol)}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+
+          {/* Footer hint */}
+          <div className="flex items-center justify-between px-3 py-1.5 border-t border-slate-800 bg-slate-950/60 text-[10px] text-slate-500">
+            <span>↑↓ navigate • Enter select • Esc close</span>
+            <span>{products.length} products</span>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────
+// Main component
+// ─────────────────────────────────────────────────────────────
 export const AdminPurchases: React.FC = () => {
   const { currentUser, dbState, addToast, selectedShopId, currentShop } = useApp();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -39,28 +258,29 @@ export const AdminPurchases: React.FC = () => {
   const [items, setItems] = useState<PurchaseItemInput[]>([]);
   const [formError, setFormError] = useState('');
 
-  // FIX: Only require authentication, no permission check
   if (!currentUser) return null;
 
-  // FIX: Both Admin and Seller can always record purchases (no permission required)
   const canRecordPurchase = true;
-
   const settings = dbState.settings;
   const isSeller = currentUser.role === 'SELLER';
-  
-  // Available shops for this user
+
   const availableShops = dbState.shops.filter(s => {
     if (currentUser.role === 'ADMIN') return true;
     const assigned = currentUser.assignedShopIds || [];
     return assigned.length === 0 || assigned.includes(s.id);
   });
 
-  const activeShopId = purchaseShopId || currentShop?.id || (selectedShopId !== 'ALL' ? selectedShopId : '') || availableShops[0]?.id || '';
+  const activeShopId =
+    purchaseShopId ||
+    currentShop?.id ||
+    (selectedShopId !== 'ALL' ? selectedShopId : '') ||
+    availableShops[0]?.id ||
+    '';
 
-  // Available products for the selected purchase shop
-  const shopProducts = dbState.products.filter(p => !purchaseShopId || purchaseShopId === 'ALL' || p.shopId === purchaseShopId);
+  const shopProducts = dbState.products.filter(
+    p => !purchaseShopId || purchaseShopId === 'ALL' || p.shopId === purchaseShopId
+  );
 
-  // Get purchases with local filtering for enhanced search
   const purchases = PurchaseService.getPurchases(
     {
       shopId: isSeller ? (currentShop?.id || selectedShopId) : (selectedShopId === 'ALL' ? undefined : selectedShopId),
@@ -68,32 +288,23 @@ export const AdminPurchases: React.FC = () => {
     currentUser
   ).filter(purchase => {
     if (!searchQuery.trim()) return true;
-    
     const q = searchQuery.trim().toLowerCase();
-    
-    // Search by supplier name
     if (purchase.supplierName.toLowerCase().includes(q)) return true;
-    
-    // Search by purchase number
     if (purchase.purchaseNumber.toLowerCase().includes(q)) return true;
-    
-    // Search by invoice number
     if (purchase.invoiceNumber && purchase.invoiceNumber.toLowerCase().includes(q)) return true;
-    
-    // Search by product names in items
-    if ((purchase.items || []).some(item => 
+    if ((purchase.items || []).some(item =>
       item.productName.toLowerCase().includes(q) ||
       item.productId.toLowerCase().includes(q)
     )) return true;
-    
-    // Search by shop name
     if (purchase.shopName && purchase.shopName.toLowerCase().includes(q)) return true;
-    
     return false;
   });
 
   const openNewPurchaseModal = () => {
-    const targetShop = currentShop?.id || (selectedShopId !== 'ALL' ? selectedShopId : availableShops[0]?.id) || '';
+    const targetShop =
+      currentShop?.id ||
+      (selectedShopId !== 'ALL' ? selectedShopId : availableShops[0]?.id) ||
+      '';
     setPurchaseShopId(targetShop);
     setSupplierName('');
     setInvoiceNumber('');
@@ -101,10 +312,10 @@ export const AdminPurchases: React.FC = () => {
     setNotes('');
     setIsEditMode(false);
     setEditingPurchase(null);
-    
+
     const prodList = dbState.products.filter(p => p.shopId === targetShop);
     const initialProd = prodList[0] || dbState.products[0];
-    
+
     setItems([
       {
         productId: initialProd?.id || '',
@@ -124,7 +335,7 @@ export const AdminPurchases: React.FC = () => {
     setInvoiceNumber(purchase.invoiceNumber || '');
     setPaymentStatus(purchase.paymentStatus);
     setNotes(purchase.notes || '');
-    
+
     setItems(
       (purchase.items || []).map(item => ({
         productId: item.productId,
@@ -132,7 +343,7 @@ export const AdminPurchases: React.FC = () => {
         unitCost: item.unitCost.toString(),
       }))
     );
-    
+
     setFormError('');
     setIsModalOpen(true);
   };
@@ -163,9 +374,10 @@ export const AdminPurchases: React.FC = () => {
           return {
             ...item,
             productId: value,
-            unitCost: matched?.purchasePrice !== undefined && matched?.purchasePrice !== null 
-              ? matched.purchasePrice.toString() 
-              : '',
+            unitCost:
+              matched?.purchasePrice !== undefined && matched?.purchasePrice !== null
+                ? matched.purchasePrice.toString()
+                : '',
           };
         }
         return { ...item, [field]: value };
@@ -474,73 +686,65 @@ export const AdminPurchases: React.FC = () => {
                   </div>
                 )}
 
-                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                  {items.map((item, idx) => {
-                    return (
-                      <div
-                        key={idx}
-                        className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-2"
-                      >
-                        <div className="flex-1">
-                          <select
-                            value={item.productId}
-                            onChange={e => updateItemRow(idx, 'productId', e.target.value)}
-                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white"
-                          >
-                            {(shopProducts.length > 0 ? shopProducts : dbState.products).map(p => (
-                              <option key={p.id} value={p.id}>
-                                {p.name} ({p.sku}) - Stock: {p.currentStock} {p.unit}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                  {items.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-2"
+                    >
+                      {/* ★ Searchable product picker replaces the old <select> */}
+                      <div className="flex-1 min-w-0">
+                        <ProductSearchSelect
+                          products={shopProducts.length > 0 ? shopProducts : dbState.products}
+                          value={item.productId}
+                          onChange={productId => updateItemRow(idx, 'productId', productId)}
+                          currencySymbol={settings.currencySymbol}
+                          placeholder="Search name or SKU..."
+                        />
+                      </div>
 
-                        <div className="w-20">
-                          <input
-                            type="number"
-                            min="0"
-                            value={item.quantity}
-                            onChange={e => {
-                              updateItemRow(idx, 'quantity', e.target.value);
-                            }}
-                            placeholder="Qty"
-                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono text-center"
-                          />
-                        </div>
+                      <div className="w-20 shrink-0">
+                        <input
+                          type="number"
+                          min="0"
+                          value={item.quantity}
+                          onChange={e => updateItemRow(idx, 'quantity', e.target.value)}
+                          placeholder="Qty"
+                          className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono text-center"
+                        />
+                      </div>
 
-                        <div className="w-28">
-                          <input
-                            type="number"
-                            step="0.01"
-                            min="0"
-                            value={item.unitCost}
-                            onChange={e => {
-                              updateItemRow(idx, 'unitCost', e.target.value);
-                            }}
-                            placeholder="Cost"
-                            className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono"
-                          />
-                        </div>
+                      <div className="w-28 shrink-0">
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={item.unitCost}
+                          onChange={e => updateItemRow(idx, 'unitCost', e.target.value)}
+                          placeholder="Cost"
+                          className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono"
+                        />
+                      </div>
 
-                        <div className="w-24 text-right font-mono font-bold text-white text-xs">
-                          {formatCurrency(
-                            (parseFloat(item.quantity as string) || 0) * (parseFloat(item.unitCost as string) || 0),
-                            settings.currencySymbol
-                          )}
-                        </div>
-
-                        {items.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => removeItemRow(idx)}
-                            className="text-slate-500 hover:text-rose-400 p-1"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                      <div className="w-24 text-right font-mono font-bold text-white text-xs shrink-0">
+                        {formatCurrency(
+                          (parseFloat(item.quantity as string) || 0) *
+                            (parseFloat(item.unitCost as string) || 0),
+                          settings.currencySymbol
                         )}
                       </div>
-                    );
-                  })}
+
+                      {items.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => removeItemRow(idx)}
+                          className="text-slate-500 hover:text-rose-400 p-1 shrink-0"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
 
