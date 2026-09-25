@@ -28,10 +28,11 @@ import { QuickBooksService } from '../../services/quickbooksService';
 import { SyncService } from '../../services/syncService';
 import { CsvDataService, ImportValidationResult } from '../../services/csvDataService';
 import { ExcelImportService, ExcelParseResult } from '../../services/excelImportService';
+import { ExcelExportService } from '../../services/excelExportService';
 import { CsvDataType } from '../../types';
 import { formatDateTime } from '../../utils/formatters';
 
-// 🔧 FIX: format selector for export
+// 🔧 Export format selector
 type ExportFormat = 'xlsx' | 'csv';
 
 export const AdminDataManagement: React.FC = () => {
@@ -42,7 +43,6 @@ export const AdminDataManagement: React.FC = () => {
   const [csvSection, setCsvSection] = useState<'export' | 'import' | 'templates' | 'history'>('export');
   const [selectedExportType, setSelectedExportType] = useState<CsvDataType>('PRODUCTS');
   const [selectedExportShopId, setSelectedExportShopId] = useState<string>('ALL');
-  // 🔧 FIX: new format state
   const [exportFormat, setExportFormat] = useState<ExportFormat>('xlsx');
 
   const [selectedTemplateType, setSelectedTemplateType] = useState<CsvDataType>('PRODUCTS');
@@ -80,11 +80,10 @@ export const AdminDataManagement: React.FC = () => {
   const importHistory = dbState.importHistory || [];
 
   // ─────────────────────────────────────────────────────────────
-  // 🔧 FIX: Unified export handler that supports both XLSX and CSV
+  // Unified CSV export handler (used for CSV format OR non-Products)
   // ─────────────────────────────────────────────────────────────
   const handleExportData = () => {
     try {
-      // Reuse the existing CSV generator as the source of truth
       const { fileName: csvFileName, csvContent } =
         CsvDataService.exportDataToCsv(selectedExportType, selectedExportShopId);
 
@@ -110,8 +109,7 @@ export const AdminDataManagement: React.FC = () => {
         return;
       }
 
-      // ── XLSX path ──
-      // Convert CSV → rows → XLSX sheet
+      // ── XLSX path for non-Product categories ──
       const rows = csvToRows(csvContent);
       if (rows.length === 0) {
         addToast({
@@ -123,8 +121,6 @@ export const AdminDataManagement: React.FC = () => {
       }
 
       const worksheet = XLSX.utils.aoa_to_sheet(rows);
-
-      // Cosmetic: auto-width columns based on content
       const colWidths = computeColWidths(rows);
       worksheet['!cols'] = colWidths.map(w => ({ wch: Math.min(w + 2, 40) }));
 
@@ -149,7 +145,7 @@ export const AdminDataManagement: React.FC = () => {
   };
 
   // ─────────────────────────────────────────────────────────────
-  // Export helpers
+  // Helpers
   // ─────────────────────────────────────────────────────────────
   function triggerDownload(blob: Blob, filename: string) {
     const url = URL.createObjectURL(blob);
@@ -162,10 +158,6 @@ export const AdminDataManagement: React.FC = () => {
     URL.revokeObjectURL(url);
   }
 
-  /**
-   * Parses a CSV string into a 2D array (array of rows).
-   * Handles quoted fields, escaped quotes, and CRLF/LF line endings.
-   */
   function csvToRows(csv: string): string[][] {
     const rows: string[][] = [];
     let row: string[] = [];
@@ -223,7 +215,6 @@ export const AdminDataManagement: React.FC = () => {
       i++;
     }
 
-    // Trailing field / row
     if (field.length > 0 || row.length > 0) {
       row.push(field);
       rows.push(row);
@@ -256,7 +247,7 @@ export const AdminDataManagement: React.FC = () => {
     }
   }
 
-  // Handle Download CSV Template (unchanged)
+  // Handle Download CSV Template
   const handleDownloadTemplate = (type: CsvDataType) => {
     const { fileName, csvContent } = CsvDataService.getCsvTemplate(type);
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -437,7 +428,7 @@ export const AdminDataManagement: React.FC = () => {
             <h2 className="text-xl font-bold text-white tracking-tight">Data Management & Excel Center</h2>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
-            Import products from Excel per shop, export CSV or Excel datasets, audit import history, and manage local JSON backups
+            Import products from Excel per shop, export datasets, audit import history, and manage local JSON backups
           </p>
         </div>
 
@@ -816,14 +807,16 @@ export const AdminDataManagement: React.FC = () => {
           {csvSection === 'export' && (
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
               <div>
-                <h3 className="font-bold text-sm text-white">Export Dataset to Excel or CSV</h3>
+                <h3 className="font-bold text-sm text-white">Export Dataset</h3>
                 <p className="text-xs text-slate-400 mt-1">
-                  Export operational data for spreadsheet analysis or backup. Unique IDs and shop associations are preserved so exported files can be safely re-imported.
+                  Every Excel export uses the same 4-column format as the importer:
+                  <span className="text-slate-200 font-semibold"> Product Name, Buying Price, Selling Price, Quantity.</span>
+                  {' '}Re-importing the file will safely bulk-update your catalog.
                 </p>
               </div>
 
+              {/* Format + Category + Shop selectors */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-3xl">
-                {/* Format selector — NEW */}
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">File Format</label>
                   <select
@@ -843,7 +836,7 @@ export const AdminDataManagement: React.FC = () => {
                     onChange={e => setSelectedExportType(e.target.value as CsvDataType)}
                     className="w-full bg-slate-950 text-xs text-white px-3 py-2 rounded-lg border border-slate-800 focus:outline-none focus:border-blue-500"
                   >
-                    <option value="PRODUCTS">📦 Products (Catalog & Prices)</option>
+                    <option value="PRODUCTS">📦 Products</option>
                     <option value="INVENTORY">📊 Inventory (Stock Movements Log)</option>
                     <option value="SALES">🛒 Sales Transactions & Receipts</option>
                     <option value="PURCHASES">🚚 Purchases & Stock Invoices</option>
@@ -860,7 +853,7 @@ export const AdminDataManagement: React.FC = () => {
                     onChange={e => setSelectedExportShopId(e.target.value)}
                     className="w-full bg-slate-950 text-xs text-white px-3 py-2 rounded-lg border border-slate-800 focus:outline-none focus:border-blue-500"
                   >
-                    <option value="ALL">🏢 All Shops (Includes Shop Column)</option>
+                    <option value="ALL">🏢 All Shops</option>
                     {shops.map(sh => (
                       <option key={sh.id} value={sh.id}>
                         🏪 {sh.name}
@@ -870,32 +863,140 @@ export const AdminDataManagement: React.FC = () => {
                 </div>
               </div>
 
-              {/* Info banner about format */}
-              <div className="p-3 bg-blue-950/30 border border-blue-800/40 rounded-lg text-xs text-blue-200 max-w-3xl">
-                {exportFormat === 'xlsx' ? (
-                  <>
-                    <strong>Excel format (.xlsx):</strong> Opens directly in Excel, WPS, or Google Sheets.
-                    Uses auto-sized columns for readability. Same data as CSV, just packaged as a real spreadsheet.
-                  </>
-                ) : (
-                  <>
-                    <strong>CSV format (.csv):</strong> Plain text, works everywhere. Includes a UTF-8 BOM
-                    so special characters display correctly in Excel.
-                  </>
-                )}
-              </div>
+              {/* ─────────────────────────────────────────────────────── */}
+              {/* Excel + PRODUCTS → show 3 grouped export options        */}
+              {/* ─────────────────────────────────────────────────────── */}
+              {exportFormat === 'xlsx' && selectedExportType === 'PRODUCTS' && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-xs text-slate-300 pt-2">
+                    <span className="font-semibold">Export Options:</span>
+                    <span className="text-slate-500">
+                      All produce the same 4-column file — pick how to group rows into sheets.
+                    </span>
+                  </div>
 
-              <div className="pt-2">
-                <button
-                  id="btn-trigger-data-export"
-                  onClick={handleExportData}
-                  className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-5 py-2.5 rounded-lg shadow-sm transition"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>
-                    Download {selectedExportType} {exportFormat === 'xlsx' ? 'Excel' : 'CSV'}
-                  </span>
-                </button>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-4xl">
+                    {/* Group 1 — All in one sheet */}
+                    <button
+                      onClick={() => {
+                        const res = ExcelExportService.exportAllProducts(selectedExportShopId);
+                        if (res.success) {
+                          addToast({
+                            type: 'success',
+                            title: 'Export Ready',
+                            description: `${res.rowCount} products saved to ${res.fileName}`,
+                          });
+                        } else {
+                          addToast({ type: 'error', title: 'Export Failed', description: res.error });
+                        }
+                      }}
+                      className="p-4 rounded-xl bg-slate-950 border border-slate-800 hover:border-blue-500/60 hover:bg-slate-800/40 text-left transition"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 rounded-lg bg-blue-950/60 border border-blue-800/40 shrink-0">
+                          <Download className="w-4 h-4 text-blue-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-xs text-white">All Products (Single Sheet)</div>
+                          <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                            One sheet with every product. Best for full-catalog exports and bulk updates.
+                          </div>
+                          <div className="text-[10px] text-blue-400 mt-1.5 font-mono">
+                            4 columns · 1 sheet
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* Group 2 — By Shop */}
+                    <button
+                      onClick={() => {
+                        const res = ExcelExportService.exportByShop();
+                        if (res.success) {
+                          addToast({
+                            type: 'success',
+                            title: 'Export Ready',
+                            description: `${res.sheetCount} shop sheets · ${res.rowCount} products`,
+                          });
+                        } else {
+                          addToast({ type: 'error', title: 'Export Failed', description: res.error });
+                        }
+                      }}
+                      className="p-4 rounded-xl bg-slate-950 border border-slate-800 hover:border-amber-500/60 hover:bg-slate-800/40 text-left transition"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 rounded-lg bg-amber-950/60 border border-amber-800/40 shrink-0">
+                          <Layers className="w-4 h-4 text-amber-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-xs text-white">By Shop (Multi-Sheet)</div>
+                          <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                            One sheet per shop. Perfect for sending individual files to store managers.
+                          </div>
+                          <div className="text-[10px] text-amber-400 mt-1.5 font-mono">
+                            4 columns · 1 sheet per shop
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* Group 3 — By Category */}
+                    <button
+                      onClick={() => {
+                        const res = ExcelExportService.exportByCategory(selectedExportShopId);
+                        if (res.success) {
+                          addToast({
+                            type: 'success',
+                            title: 'Export Ready',
+                            description: `${res.sheetCount} category sheets · ${res.rowCount} products`,
+                          });
+                        } else {
+                          addToast({ type: 'error', title: 'Export Failed', description: res.error });
+                        }
+                      }}
+                      className="p-4 rounded-xl bg-slate-950 border border-slate-800 hover:border-purple-500/60 hover:bg-slate-800/40 text-left transition"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 rounded-lg bg-purple-950/60 border border-purple-800/40 shrink-0">
+                          <FileSpreadsheet className="w-4 h-4 text-purple-400" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-semibold text-xs text-white">By Category (Multi-Sheet)</div>
+                          <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">
+                            One sheet per category. Great for reviewing inventory by department.
+                          </div>
+                          <div className="text-[10px] text-purple-400 mt-1.5 font-mono">
+                            4 columns · 1 sheet per category
+                          </div>
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Fallback download button for CSV or non-Products */}
+              {(exportFormat === 'csv' || selectedExportType !== 'PRODUCTS') && (
+                <div className="pt-2">
+                  <button
+                    id="btn-trigger-data-export"
+                    onClick={handleExportData}
+                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-5 py-2.5 rounded-lg shadow-sm transition"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>
+                      Download {selectedExportType} {exportFormat === 'xlsx' ? 'Excel' : 'CSV'}
+                    </span>
+                  </button>
+                </div>
+              )}
+
+              {/* Info banner */}
+              <div className="p-3 bg-emerald-950/30 border border-emerald-800/40 rounded-lg text-xs text-emerald-200 max-w-3xl">
+                <strong>✅ Round-trip safe:</strong> Every Excel export above uses exactly the 4 headers the importer
+                recognizes: <code className="text-emerald-100">Product Name</code>, <code className="text-emerald-100">Buying Price</code>,{' '}
+                <code className="text-emerald-100">Selling Price</code>, <code className="text-emerald-100">Quantity</code>.
+                You can download a file, edit it in Excel, then re-upload it to bulk-update your catalog.
               </div>
             </div>
           )}
