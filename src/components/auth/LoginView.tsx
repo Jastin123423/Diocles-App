@@ -8,6 +8,8 @@ import {
   Lock,
   Boxes,
   RefreshCw,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { AuthService } from '../../services/authService';
@@ -24,6 +26,8 @@ export const LoginView: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [statusMsg, setStatusMsg] = useState('');
+  // 🔧 FIX: manual toggle for password visibility (used on Admin portal)
+  const [showPassword, setShowPassword] = useState(false);
 
   const settings = dbState.settings;
 
@@ -130,6 +134,10 @@ export const LoginView: React.FC = () => {
     }
   };
 
+  // 🔧 FIX: Password is visible when SELLER portal is active.
+  //         Masked when ADMIN portal is active (unless admin manually toggles it).
+  const passwordIsVisible = activePortal === 'SELLER' || showPassword;
+
   return (
     <div id="login-screen" className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between select-none">
       {/* Top Windows Bar Simulator */}
@@ -167,6 +175,8 @@ export const LoginView: React.FC = () => {
                 onClick={() => {
                   setActivePortal('SELLER');
                   setErrorMsg('');
+                  // 🔧 FIX: reset manual toggle when switching portals
+                  setShowPassword(false);
                 }}
                 className={`flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-semibold transition-all ${
                   activePortal === 'SELLER'
@@ -184,6 +194,8 @@ export const LoginView: React.FC = () => {
                 onClick={() => {
                   setActivePortal('ADMIN');
                   setErrorMsg('');
+                  // 🔧 FIX: reset manual toggle when switching portals
+                  setShowPassword(false);
                 }}
                 className={`flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-semibold transition-all ${
                   activePortal === 'ADMIN'
@@ -240,15 +252,50 @@ export const LoginView: React.FC = () => {
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
                     <KeyRound className="w-4 h-4" />
                   </div>
+
+                  {/* 🔧 FIX: type is text when visible, password when hidden.
+                      Seller portal → always visible.
+                      Admin portal → hidden by default + eye toggle. */}
                   <input
                     id="login-password-input"
-                    type="password"
+                    type={passwordIsVisible ? 'text' : 'password'}
                     value={password}
                     onChange={e => setPassword(e.target.value)}
                     placeholder="Enter password..."
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="off"
+                    spellCheck={false}
+                    className={`w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 ${
+                      activePortal === 'ADMIN' ? 'pr-10' : 'pr-3'
+                    } py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition`}
                   />
+
+                  {/* 🔧 FIX: Eye toggle only on ADMIN portal */}
+                  {activePortal === 'ADMIN' && (
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(v => !v)}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300 transition"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
+                      tabIndex={-1}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="w-4 h-4" />
+                      ) : (
+                        <Eye className="w-4 h-4" />
+                      )}
+                    </button>
+                  )}
                 </div>
+
+                {/* 🔧 FIX: Friendly hint on Seller portal */}
+                {activePortal === 'SELLER' && (
+                  <p className="text-[10px] text-slate-500 mt-1.5 flex items-center gap-1">
+                    <Eye className="w-3 h-3" />
+                    Your password is visible so you can type it correctly.
+                  </p>
+                )}
               </div>
 
               {/* Remember Me Checkbox */}
