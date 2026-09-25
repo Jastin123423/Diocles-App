@@ -21,6 +21,7 @@ import {
   AlertCircle,
   HelpCircle,
 } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { useApp } from '../../context/AppContext';
 import { BackupService } from '../../services/backupService';
 import { QuickBooksService } from '../../services/quickbooksService';
@@ -30,6 +31,9 @@ import { ExcelImportService, ExcelParseResult } from '../../services/excelImport
 import { CsvDataType } from '../../types';
 import { formatDateTime } from '../../utils/formatters';
 
+// 🔧 FIX: format selector for export
+type ExportFormat = 'xlsx' | 'csv';
+
 export const AdminDataManagement: React.FC = () => {
   const { currentUser, dbState, addToast } = useApp();
   const [activeSubTab, setActiveSubTab] = useState<'csv' | 'backup' | 'quickbooks' | 'sync'>('csv');
@@ -38,6 +42,8 @@ export const AdminDataManagement: React.FC = () => {
   const [csvSection, setCsvSection] = useState<'export' | 'import' | 'templates' | 'history'>('export');
   const [selectedExportType, setSelectedExportType] = useState<CsvDataType>('PRODUCTS');
   const [selectedExportShopId, setSelectedExportShopId] = useState<string>('ALL');
+  // 🔧 FIX: new format state
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('xlsx');
 
   const [selectedTemplateType, setSelectedTemplateType] = useState<CsvDataType>('PRODUCTS');
 
@@ -73,36 +79,188 @@ export const AdminDataManagement: React.FC = () => {
   const shops = dbState.shops || [];
   const importHistory = dbState.importHistory || [];
 
-  // Handle Export CSV
-  const handleExportCsv = () => {
-    const { fileName, csvContent } = CsvDataService.exportDataToCsv(selectedExportType, selectedExportShopId);
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  // ─────────────────────────────────────────────────────────────
+  // 🔧 FIX: Unified export handler that supports both XLSX and CSV
+  // ─────────────────────────────────────────────────────────────
+  const handleExportData = () => {
+    try {
+      // Reuse the existing CSV generator as the source of truth
+      const { fileName: csvFileName, csvContent } =
+        CsvDataService.exportDataToCsv(selectedExportType, selectedExportShopId);
+
+      if (!csvContent || csvContent.trim().length === 0) {
+        addToast({
+          type: 'warning',
+          title: 'Nothing to export',
+          description: `No ${selectedExportType.toLowerCase()} records found for this filter.`,
+        });
+        return;
+      }
+
+      if (exportFormat === 'csv') {
+        // ── CSV path (unchanged behavior) ──
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        triggerDownload(blob, csvFileName);
+
+        addToast({
+          type: 'success',
+          title: 'CSV Export Generated',
+          description: `Downloaded ${csvFileName}`,
+        });
+        return;
+      }
+
+      // ── XLSX path ──
+      // Convert CSV → rows → XLSX sheet
+      const rows = csvToRows(csvContent);
+      if (rows.length === 0) {
+        addToast({
+          type: 'warning',
+          title: 'Nothing to export',
+          description: 'The generated data was empty.',
+        });
+        return;
+      }
+
+      const worksheet = XLSX.utils.aoa_to_sheet(rows);
+
+      // Cosmetic: auto-width columns based on content
+      const colWidths = computeColWidths(rows);
+      worksheet['!cols'] = colWidths.map(w => ({ wch: Math.min(w + 2, 40) }));
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, sheetNameFor(selectedExportType));
+
+      const xlsxFileName = csvFileName.replace(/\.csv$/i, '.xlsx');
+      XLSX.writeFile(workbook, xlsxFileName);
+
+      addToast({
+        type: 'success',
+        title: 'Excel Export Generated',
+        description: `Downloaded ${xlsxFileName}`,
+      });
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'Export Failed',
+        description: err.message || 'Could not generate file.',
+      });
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  // Export helpers
+  // ─────────────────────────────────────────────────────────────
+  function triggerDownload(blob: Blob, filename: string) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', fileName);
+    link.setAttribute('download', filename);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
 
-    addToast({
-      type: 'success',
-      title: 'CSV Export Generated',
-      description: `Downloaded ${fileName} with isolated shop data and IDs.`,
-    });
-  };
+  /**
+   * Parses a CSV string into a 2D array (array of rows).
+   * Handles quoted fields, escaped quotes, and CRLF/LF line endings.
+   */
+  function csvToRows(csv: string): string[][] {
+    const rows: string[][] = [];
+    let row: string[] = [];
+    let field = '';
+    let inQuotes = false;
+    let i = 0;
 
-  // Handle Download CSV Template
+    while (i < csv.length) {
+      const ch = csv[i];
+
+      if (inQuotes) {
+        if (ch === '"') {
+          if (csv[i + 1] === '"') {
+            field += '"';
+            i += 2;
+            continue;
+          }
+          inQuotes = false;
+          i++;
+          continue;
+        }
+        field += ch;
+        i++;
+        continue;
+      }
+
+      if (ch === '"') {
+        inQuotes = true;
+        i++;
+        continue;
+      }
+
+      if (ch === ',') {
+        row.push(field);
+        field = '';
+        i++;
+        continue;
+      }
+
+      if (ch === '\r') {
+        i++;
+        continue;
+      }
+
+      if (ch === '\n') {
+        row.push(field);
+        rows.push(row);
+        row = [];
+        field = '';
+        i++;
+        continue;
+      }
+
+      field += ch;
+      i++;
+    }
+
+    // Trailing field / row
+    if (field.length > 0 || row.length > 0) {
+      row.push(field);
+      rows.push(row);
+    }
+
+    return rows;
+  }
+
+  function computeColWidths(rows: string[][]): number[] {
+    const widths: number[] = [];
+    for (const row of rows) {
+      row.forEach((cell, idx) => {
+        const len = (cell ?? '').toString().length;
+        widths[idx] = Math.max(widths[idx] || 0, len);
+      });
+    }
+    return widths;
+  }
+
+  function sheetNameFor(type: CsvDataType): string {
+    switch (type) {
+      case 'PRODUCTS': return 'Products';
+      case 'INVENTORY': return 'Inventory';
+      case 'SALES': return 'Sales';
+      case 'PURCHASES': return 'Purchases';
+      case 'EXPENSES': return 'Expenses';
+      case 'SELLERS': return 'Sellers';
+      case 'SHOPS': return 'Shops';
+      default: return 'Data';
+    }
+  }
+
+  // Handle Download CSV Template (unchanged)
   const handleDownloadTemplate = (type: CsvDataType) => {
     const { fileName, csvContent } = CsvDataService.getCsvTemplate(type);
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', fileName);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    triggerDownload(blob, fileName);
 
     addToast({
       type: 'info',
@@ -279,7 +437,7 @@ export const AdminDataManagement: React.FC = () => {
             <h2 className="text-xl font-bold text-white tracking-tight">Data Management & Excel Center</h2>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
-            Import products from Excel per shop, export CSV datasets, audit import history, and manage local JSON backups
+            Import products from Excel per shop, export CSV or Excel datasets, audit import history, and manage local JSON backups
           </p>
         </div>
 
@@ -364,7 +522,7 @@ export const AdminDataManagement: React.FC = () => {
                 csvSection === 'export' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'
               }`}
             >
-              📤 Export CSV
+              📤 Export Data
             </button>
             <button
               onClick={() => setCsvSection('templates')}
@@ -654,17 +812,30 @@ export const AdminDataManagement: React.FC = () => {
             </div>
           )}
 
-          {/* 2. EXPORT CSV SECTION */}
+          {/* 2. EXPORT SECTION (Excel + CSV) */}
           {csvSection === 'export' && (
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
               <div>
-                <h3 className="font-bold text-sm text-white">Export Dataset to CSV</h3>
+                <h3 className="font-bold text-sm text-white">Export Dataset to Excel or CSV</h3>
                 <p className="text-xs text-slate-400 mt-1">
                   Export operational data for spreadsheet analysis or backup. Unique IDs and shop associations are preserved so exported files can be safely re-imported.
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-3xl">
+                {/* Format selector — NEW */}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">File Format</label>
+                  <select
+                    value={exportFormat}
+                    onChange={e => setExportFormat(e.target.value as ExportFormat)}
+                    className="w-full bg-slate-950 text-xs text-white px-3 py-2 rounded-lg border border-slate-800 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="xlsx">📊 Excel (.xlsx)</option>
+                    <option value="csv">📄 CSV (.csv)</option>
+                  </select>
+                </div>
+
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">Data Category</label>
                   <select
@@ -699,14 +870,31 @@ export const AdminDataManagement: React.FC = () => {
                 </div>
               </div>
 
+              {/* Info banner about format */}
+              <div className="p-3 bg-blue-950/30 border border-blue-800/40 rounded-lg text-xs text-blue-200 max-w-3xl">
+                {exportFormat === 'xlsx' ? (
+                  <>
+                    <strong>Excel format (.xlsx):</strong> Opens directly in Excel, WPS, or Google Sheets.
+                    Uses auto-sized columns for readability. Same data as CSV, just packaged as a real spreadsheet.
+                  </>
+                ) : (
+                  <>
+                    <strong>CSV format (.csv):</strong> Plain text, works everywhere. Includes a UTF-8 BOM
+                    so special characters display correctly in Excel.
+                  </>
+                )}
+              </div>
+
               <div className="pt-2">
                 <button
-                  id="btn-trigger-csv-export"
-                  onClick={handleExportCsv}
+                  id="btn-trigger-data-export"
+                  onClick={handleExportData}
                   className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-5 py-2.5 rounded-lg shadow-sm transition"
                 >
                   <Download className="w-4 h-4" />
-                  <span>Download {selectedExportType} CSV</span>
+                  <span>
+                    Download {selectedExportType} {exportFormat === 'xlsx' ? 'Excel' : 'CSV'}
+                  </span>
                 </button>
               </div>
             </div>
