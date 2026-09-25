@@ -8,18 +8,12 @@ import {
   Layers,
   CheckCircle2,
   AlertTriangle,
-  FileText,
   RotateCcw,
-  Sparkles,
   Cloud,
   Check,
   X,
   Code,
-  Store,
-  Clock,
-  History,
   AlertCircle,
-  HelpCircle,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { useApp } from '../../context/AppContext';
@@ -32,7 +26,6 @@ import { ExcelExportService } from '../../services/excelExportService';
 import { CsvDataType } from '../../types';
 import { formatDateTime } from '../../utils/formatters';
 
-// 🔧 Export format selector
 type ExportFormat = 'xlsx' | 'csv';
 
 export const AdminDataManagement: React.FC = () => {
@@ -42,10 +35,8 @@ export const AdminDataManagement: React.FC = () => {
   // CSV Data Center sub-states
   const [csvSection, setCsvSection] = useState<'export' | 'import' | 'templates' | 'history'>('export');
   const [selectedExportType, setSelectedExportType] = useState<CsvDataType>('PRODUCTS');
-  const [selectedExportShopId, setSelectedExportShopId] = useState<string>('ALL');
+  const [selectedExportShopId, setSelectedExportShopId] = useState<string>('');
   const [exportFormat, setExportFormat] = useState<ExportFormat>('xlsx');
-
-  const [selectedTemplateType, setSelectedTemplateType] = useState<CsvDataType>('PRODUCTS');
 
   // CSV Import State
   const [importDataType, setImportDataType] = useState<CsvDataType>('PRODUCTS');
@@ -80,24 +71,26 @@ export const AdminDataManagement: React.FC = () => {
   const importHistory = dbState.importHistory || [];
 
   // ─────────────────────────────────────────────────────────────
-  // Unified CSV export handler (used for CSV format OR non-Products)
+  // Non-Product export path (Sales, Purchases, Expenses, etc.)
   // ─────────────────────────────────────────────────────────────
   const handleExportData = () => {
     try {
       const { fileName: csvFileName, csvContent } =
-        CsvDataService.exportDataToCsv(selectedExportType, selectedExportShopId);
+        CsvDataService.exportDataToCsv(
+          selectedExportType,
+          selectedExportShopId || 'ALL'
+        );
 
       if (!csvContent || csvContent.trim().length === 0) {
         addToast({
           type: 'warning',
           title: 'Nothing to export',
-          description: `No ${selectedExportType.toLowerCase()} records found for this filter.`,
+          description: `No ${selectedExportType.toLowerCase()} records found.`,
         });
         return;
       }
 
       if (exportFormat === 'csv') {
-        // ── CSV path (unchanged behavior) ──
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         triggerDownload(blob, csvFileName);
 
@@ -109,17 +102,7 @@ export const AdminDataManagement: React.FC = () => {
         return;
       }
 
-      // ── XLSX path for non-Product categories ──
       const rows = csvToRows(csvContent);
-      if (rows.length === 0) {
-        addToast({
-          type: 'warning',
-          title: 'Nothing to export',
-          description: 'The generated data was empty.',
-        });
-        return;
-      }
-
       const worksheet = XLSX.utils.aoa_to_sheet(rows);
       const colWidths = computeColWidths(rows);
       worksheet['!cols'] = colWidths.map(w => ({ wch: Math.min(w + 2, 40) }));
@@ -140,6 +123,36 @@ export const AdminDataManagement: React.FC = () => {
         type: 'error',
         title: 'Export Failed',
         description: err.message || 'Could not generate file.',
+      });
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  // Product Excel export — specific shop only
+  // ─────────────────────────────────────────────────────────────
+  const handleExportProductsExcel = () => {
+    if (!selectedExportShopId) {
+      addToast({
+        type: 'warning',
+        title: 'Select Shop First',
+        description: 'Choose the shop you want to export products from.',
+      });
+      return;
+    }
+
+    const res = ExcelExportService.exportAllProducts(selectedExportShopId);
+
+    if (res.success) {
+      addToast({
+        type: 'success',
+        title: 'Export Ready',
+        description: `${res.rowCount} products saved to ${res.fileName}`,
+      });
+    } else {
+      addToast({
+        type: 'error',
+        title: 'Export Failed',
+        description: res.error || 'Could not generate file.',
       });
     }
   };
@@ -256,11 +269,11 @@ export const AdminDataManagement: React.FC = () => {
     addToast({
       type: 'info',
       title: 'Template Downloaded',
-      description: `Downloaded template ${fileName}. Fill in your data and re-upload.`,
+      description: `Downloaded template ${fileName}.`,
     });
   };
 
-  // Handle CSV File Selection & Instant Validation
+  // Handle CSV File Selection
   const handleCsvFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -283,7 +296,7 @@ export const AdminDataManagement: React.FC = () => {
     reader.readAsText(file);
   };
 
-  // Handle Confirm & Commit CSV Import
+  // Handle CSV Import Commit
   const handleCommitImport = async () => {
     if (!validationResult) return;
     setIsImporting(true);
@@ -315,7 +328,7 @@ export const AdminDataManagement: React.FC = () => {
     addToast({
       type: 'success',
       title: 'Backup Generated',
-      description: 'Full database snapshot exported to your local disk.',
+      description: 'Full database snapshot exported.',
     });
   };
 
@@ -333,7 +346,7 @@ export const AdminDataManagement: React.FC = () => {
           addToast({
             type: 'success',
             title: 'Database Restored',
-            description: 'All collections, shops, users, and transactions restored successfully.',
+            description: 'All collections, shops, users, and transactions restored.',
           });
           window.location.reload();
         } else {
@@ -354,7 +367,7 @@ export const AdminDataManagement: React.FC = () => {
     reader.readAsText(file);
   };
 
-  // Handle Wipe All Demo/Transactional Data
+  // Handle Wipe All Data
   const handleWipeAllData = () => {
     setIsWiping(true);
     const res = BackupService.wipeAllData(currentUser);
@@ -365,7 +378,7 @@ export const AdminDataManagement: React.FC = () => {
       addToast({
         type: 'success',
         title: 'All Demo & Business Data Deleted',
-        description: 'The database has been cleanly purged of all products, sales, expenses, debts, and movements.',
+        description: 'The database has been cleanly purged.',
       });
       window.location.reload();
     } else {
@@ -401,7 +414,7 @@ export const AdminDataManagement: React.FC = () => {
     }
   };
 
-  // Simulate Cloud Sync
+  // Cloud Sync
   const handleSimulateSync = async () => {
     setIsSyncing(true);
     const result = await SyncService.processSyncQueue(currentUser, true);
@@ -411,7 +424,7 @@ export const AdminDataManagement: React.FC = () => {
       addToast({
         type: 'success',
         title: 'Sync Successful',
-        description: `Synchronized ${result.processedCount} local transactions with cloud endpoint queue.`,
+        description: `Synchronized ${result.processedCount} local transactions with cloud.`,
       });
     }
   };
@@ -626,19 +639,14 @@ export const AdminDataManagement: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Format hint */}
                 <div className="p-3 bg-blue-950/30 border border-blue-800/40 rounded-lg text-xs text-blue-200">
                   <strong>Excel Format:</strong>
                   <div className="mt-1 font-mono text-[11px] text-blue-100">
                     | Product Name | Buying Price | Selling Price | Quantity |
                   </div>
-                  <div className="mt-1 text-[11px] text-slate-400">
-                    Header names are flexible: "Product Name", "Product", or "Name" work. Same for "Buying Price"/"Cost", "Selling Price"/"Price", "Quantity"/"Qty"/"Stock".
-                  </div>
                 </div>
               </div>
 
-              {/* Parsing indicator */}
               {isParsingExcel && (
                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 text-center text-slate-400 text-xs">
                   <RefreshCw className="w-5 h-5 mx-auto mb-2 animate-spin text-blue-400" />
@@ -646,7 +654,6 @@ export const AdminDataManagement: React.FC = () => {
                 </div>
               )}
 
-              {/* Parse Result Preview */}
               {excelParseResult && !isParsingExcel && (
                 <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5 animate-in fade-in">
                   <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-800">
@@ -703,7 +710,6 @@ export const AdminDataManagement: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Metric cards */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                     <div className="p-3 bg-slate-950 rounded-lg border border-slate-800 text-center">
                       <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-1">
@@ -737,7 +743,6 @@ export const AdminDataManagement: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Errors */}
                   {excelParseResult.errors.length > 0 && (
                     <div className="p-4 bg-rose-950/20 border border-rose-800/40 rounded-lg space-y-2">
                       <h5 className="text-xs font-bold text-rose-300 flex items-center gap-1.5">
@@ -757,7 +762,6 @@ export const AdminDataManagement: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Preview */}
                   {excelParseResult.rows.length > 0 && (
                     <div>
                       <h5 className="text-xs font-bold text-slate-300 mb-2">
@@ -803,20 +807,14 @@ export const AdminDataManagement: React.FC = () => {
             </div>
           )}
 
-          {/* 2. EXPORT SECTION (Excel + CSV) */}
+          {/* 2. EXPORT SECTION */}
           {csvSection === 'export' && (
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
               <div>
                 <h3 className="font-bold text-sm text-white">Export Dataset</h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  Every Excel export uses the same 4-column format as the importer:
-                  <span className="text-slate-200 font-semibold"> Product Name, Buying Price, Selling Price, Quantity.</span>
-                  {' '}Re-importing the file will safely bulk-update your catalog.
-                </p>
               </div>
 
-              {/* Format + Category + Shop selectors */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 max-w-3xl">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1.5">File Format</label>
                   <select
@@ -846,142 +844,43 @@ export const AdminDataManagement: React.FC = () => {
                   </select>
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">Filter by Shop Unit</label>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Target Shop <span className="text-rose-400">*</span>
+                  </label>
                   <select
                     value={selectedExportShopId}
                     onChange={e => setSelectedExportShopId(e.target.value)}
                     className="w-full bg-slate-950 text-xs text-white px-3 py-2 rounded-lg border border-slate-800 focus:outline-none focus:border-blue-500"
                   >
-                    <option value="ALL">🏢 All Shops</option>
+                    <option value="">-- Select a shop --</option>
                     {shops.map(sh => (
                       <option key={sh.id} value={sh.id}>
-                        🏪 {sh.name}
+                        🏪 {sh.name} ({sh.code || 'UNIT'})
                       </option>
                     ))}
                   </select>
                 </div>
               </div>
 
-              {/* ─────────────────────────────────────────────────────── */}
-              {/* Excel + PRODUCTS → show 3 grouped export options        */}
-              {/* ─────────────────────────────────────────────────────── */}
-              {exportFormat === 'xlsx' && selectedExportType === 'PRODUCTS' && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 text-xs text-slate-300 pt-2">
-                    <span className="font-semibold">Export Options:</span>
-                    <span className="text-slate-500">
-                      All produce the same 4-column file — pick how to group rows into sheets.
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 max-w-4xl">
-                    {/* Group 1 — All in one sheet */}
-                    <button
-                      onClick={() => {
-                        const res = ExcelExportService.exportAllProducts(selectedExportShopId);
-                        if (res.success) {
-                          addToast({
-                            type: 'success',
-                            title: 'Export Ready',
-                            description: `${res.rowCount} products saved to ${res.fileName}`,
-                          });
-                        } else {
-                          addToast({ type: 'error', title: 'Export Failed', description: res.error });
-                        }
-                      }}
-                      className="p-4 rounded-xl bg-slate-950 border border-slate-800 hover:border-blue-500/60 hover:bg-slate-800/40 text-left transition"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="p-2 rounded-lg bg-blue-950/60 border border-blue-800/40 shrink-0">
-                          <Download className="w-4 h-4 text-blue-400" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-semibold text-xs text-white">All Products (Single Sheet)</div>
-                          <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                            One sheet with every product. Best for full-catalog exports and bulk updates.
-                          </div>
-                          <div className="text-[10px] text-blue-400 mt-1.5 font-mono">
-                            4 columns · 1 sheet
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-
-                    {/* Group 2 — By Shop */}
-                    <button
-                      onClick={() => {
-                        const res = ExcelExportService.exportByShop();
-                        if (res.success) {
-                          addToast({
-                            type: 'success',
-                            title: 'Export Ready',
-                            description: `${res.sheetCount} shop sheets · ${res.rowCount} products`,
-                          });
-                        } else {
-                          addToast({ type: 'error', title: 'Export Failed', description: res.error });
-                        }
-                      }}
-                      className="p-4 rounded-xl bg-slate-950 border border-slate-800 hover:border-amber-500/60 hover:bg-slate-800/40 text-left transition"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="p-2 rounded-lg bg-amber-950/60 border border-amber-800/40 shrink-0">
-                          <Layers className="w-4 h-4 text-amber-400" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-semibold text-xs text-white">By Shop (Multi-Sheet)</div>
-                          <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                            One sheet per shop. Perfect for sending individual files to store managers.
-                          </div>
-                          <div className="text-[10px] text-amber-400 mt-1.5 font-mono">
-                            4 columns · 1 sheet per shop
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-
-                    {/* Group 3 — By Category */}
-                    <button
-                      onClick={() => {
-                        const res = ExcelExportService.exportByCategory(selectedExportShopId);
-                        if (res.success) {
-                          addToast({
-                            type: 'success',
-                            title: 'Export Ready',
-                            description: `${res.sheetCount} category sheets · ${res.rowCount} products`,
-                          });
-                        } else {
-                          addToast({ type: 'error', title: 'Export Failed', description: res.error });
-                        }
-                      }}
-                      className="p-4 rounded-xl bg-slate-950 border border-slate-800 hover:border-purple-500/60 hover:bg-slate-800/40 text-left transition"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="p-2 rounded-lg bg-purple-950/60 border border-purple-800/40 shrink-0">
-                          <FileSpreadsheet className="w-4 h-4 text-purple-400" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="font-semibold text-xs text-white">By Category (Multi-Sheet)</div>
-                          <div className="text-[11px] text-slate-400 mt-0.5 leading-snug">
-                            One sheet per category. Great for reviewing inventory by department.
-                          </div>
-                          <div className="text-[10px] text-purple-400 mt-1.5 font-mono">
-                            4 columns · 1 sheet per category
-                          </div>
-                        </div>
-                      </div>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* Fallback download button for CSV or non-Products */}
-              {(exportFormat === 'csv' || selectedExportType !== 'PRODUCTS') && (
+              {/* Product Excel export — shop-scoped */}
+              {exportFormat === 'xlsx' && selectedExportType === 'PRODUCTS' ? (
                 <div className="pt-2">
                   <button
-                    id="btn-trigger-data-export"
+                    onClick={handleExportProductsExcel}
+                    disabled={!selectedExportShopId}
+                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-5 py-2.5 rounded-lg shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Download PRODUCTS Excel</span>
+                  </button>
+                </div>
+              ) : (
+                <div className="pt-2">
+                  <button
                     onClick={handleExportData}
-                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-5 py-2.5 rounded-lg shadow-sm transition"
+                    disabled={!selectedExportShopId}
+                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-5 py-2.5 rounded-lg shadow-sm transition disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     <Download className="w-4 h-4" />
                     <span>
@@ -990,14 +889,6 @@ export const AdminDataManagement: React.FC = () => {
                   </button>
                 </div>
               )}
-
-              {/* Info banner */}
-              <div className="p-3 bg-emerald-950/30 border border-emerald-800/40 rounded-lg text-xs text-emerald-200 max-w-3xl">
-                <strong>✅ Round-trip safe:</strong> Every Excel export above uses exactly the 4 headers the importer
-                recognizes: <code className="text-emerald-100">Product Name</code>, <code className="text-emerald-100">Buying Price</code>,{' '}
-                <code className="text-emerald-100">Selling Price</code>, <code className="text-emerald-100">Quantity</code>.
-                You can download a file, edit it in Excel, then re-upload it to bulk-update your catalog.
-              </div>
             </div>
           )}
 
@@ -1006,9 +897,6 @@ export const AdminDataManagement: React.FC = () => {
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-5">
               <div>
                 <h3 className="font-bold text-sm text-white">Download Standard CSV Templates</h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  Use these pre-formatted templates to populate your catalog, shop units, expense categories, or staff lists.
-                </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
@@ -1016,7 +904,6 @@ export const AdminDataManagement: React.FC = () => {
                   <div>
                     <span className="text-xl mb-2 block">📦</span>
                     <h4 className="font-semibold text-xs text-white">Products Template</h4>
-                    <p className="text-[11px] text-slate-400 mt-1">SKU, barcodes, shop IDs, prices, initial stock.</p>
                   </div>
                   <button
                     onClick={() => handleDownloadTemplate('PRODUCTS')}
@@ -1031,7 +918,6 @@ export const AdminDataManagement: React.FC = () => {
                   <div>
                     <span className="text-xl mb-2 block">🏪</span>
                     <h4 className="font-semibold text-xs text-white">Shops Template</h4>
-                    <p className="text-[11px] text-slate-400 mt-1">Shop names, codes, addresses, contact numbers.</p>
                   </div>
                   <button
                     onClick={() => handleDownloadTemplate('SHOPS')}
@@ -1046,7 +932,6 @@ export const AdminDataManagement: React.FC = () => {
                   <div>
                     <span className="text-xl mb-2 block">📉</span>
                     <h4 className="font-semibold text-xs text-white">Expenses Template</h4>
-                    <p className="text-[11px] text-slate-400 mt-1">Shop/Company expenses, amounts, categories.</p>
                   </div>
                   <button
                     onClick={() => handleDownloadTemplate('EXPENSES')}
@@ -1061,7 +946,6 @@ export const AdminDataManagement: React.FC = () => {
                   <div>
                     <span className="text-xl mb-2 block">👥</span>
                     <h4 className="font-semibold text-xs text-white">Sellers Template</h4>
-                    <p className="text-[11px] text-slate-400 mt-1">Usernames, names, passwords, assigned shops.</p>
                   </div>
                   <button
                     onClick={() => handleDownloadTemplate('SELLERS')}
@@ -1080,9 +964,6 @@ export const AdminDataManagement: React.FC = () => {
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-6 space-y-4">
               <div>
                 <h3 className="font-bold text-sm text-white">Import Audit History</h3>
-                <p className="text-xs text-slate-400 mt-1">
-                  Log of all Excel & CSV bulk uploads processed in the offline system.
-                </p>
               </div>
 
               {importHistory.length > 0 ? (
@@ -1133,7 +1014,7 @@ export const AdminDataManagement: React.FC = () => {
         </div>
       )}
 
-      {/* SUB-TAB 2: JSON BACKUP / RESTORE & CLEAN SLATE */}
+      {/* SUB-TAB 2: JSON BACKUP / RESTORE */}
       {activeSubTab === 'backup' && (
         <div className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -1179,7 +1060,6 @@ export const AdminDataManagement: React.FC = () => {
             </div>
           </div>
 
-          {/* Cloudflare Clean Slate / Purge Data Card */}
           <div className="bg-slate-900/90 border border-rose-900/40 rounded-2xl p-6 relative overflow-hidden">
             <div className="flex items-start justify-between gap-4">
               <div>
@@ -1189,7 +1069,7 @@ export const AdminDataManagement: React.FC = () => {
                 </div>
                 <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">
                   Permanently delete all demo and transaction records (products, sales, purchases, expenses, stock movements, debts, import history, and notifications).
-                  Your system shop units and master Administrator account will remain active and ready for live inventory entry or Cloudflare backend integration.
+                  Your system shop units and master Administrator account will remain active.
                 </p>
               </div>
 
@@ -1203,7 +1083,6 @@ export const AdminDataManagement: React.FC = () => {
             </div>
           </div>
 
-          {/* Wipe Confirmation Modal */}
           {showWipeConfirm && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
               <div className="bg-slate-900 border border-rose-800/60 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
