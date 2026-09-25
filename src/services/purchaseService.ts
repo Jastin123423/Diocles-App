@@ -12,7 +12,7 @@ export interface PurchaseItemInput {
 export class PurchaseService {
   /**
    * Record a new purchase order / stock-in for a specific shop.
-   * Uses Moving Average Cost for inventory valuation.
+   * Uses LATEST PURCHASE PRICE for inventory valuation.
    */
   public static recordPurchase(
     params: {
@@ -79,26 +79,17 @@ export class PurchaseService {
         total: itemTotal,
       });
 
-      // MOVING AVERAGE COST CALCULATION
+      // LATEST PURCHASE PRICE (no averaging)
       const currentStock = prod.currentStock || 0;
-      const currentPrice = prod.purchasePrice || 0;
-      const currentTotalCost = currentStock * currentPrice;
-      const newTotalCost = itemInput.quantity * itemInput.unitCost;
-      const newTotalStock = currentStock + itemInput.quantity;
-      
-      // Calculate weighted average cost
-      const newAveragePrice = newTotalStock > 0 
-        ? (currentTotalCost + newTotalCost) / newTotalStock 
-        : itemInput.unitCost;
+      const newStock = currentStock + itemInput.quantity;
 
       const prevStock = currentStock;
-      const newStock = newTotalStock;
 
-      // Update product with new stock and AVERAGE cost (not latest cost)
+      // Update product with new stock and LATEST purchase price
       products[prodIndex] = {
         ...prod,
         currentStock: newStock,
-        purchasePrice: Number(newAveragePrice.toFixed(2)),
+        purchasePrice: Number(itemInput.unitCost.toFixed(2)), // ✅ Always use latest price
         updatedAt: new Date().toISOString(),
       };
 
@@ -113,7 +104,7 @@ export class PurchaseService {
         changeQty: itemInput.quantity,
         newQty: newStock,
         type: 'PURCHASE' as const,
-        reason: `PO ${purchaseNumber} from ${params.supplierName?.trim() || 'Walk-in Supplier'} [${shop.name}] @ ${itemInput.unitCost}/unit (Avg: ${newAveragePrice.toFixed(2)})`,
+        reason: `PO ${purchaseNumber} from ${params.supplierName?.trim() || 'Walk-in Supplier'} [${shop.name}] @ ${itemInput.unitCost}/unit`,
         costValue: itemTotal,
         userId: currentUser.id,
         userName: currentUser.name,
@@ -122,7 +113,7 @@ export class PurchaseService {
       db.saveMovements([movement, ...db.getMovements()]);
     }
 
-    // Save updated products with new average costs
+    // Save updated products with new latest costs
     db.saveProducts(products);
 
     const finalSupplierName = params.supplierName?.trim() || 'Walk-in Supplier';
@@ -230,7 +221,7 @@ export class PurchaseService {
         }
       }
 
-      // Then apply NEW quantities (add new stock with average cost)
+      // Then apply NEW quantities (add new stock with LATEST price)
       const purchaseItems: PurchaseItem[] = [];
       let totalAmount = 0;
 
@@ -260,21 +251,15 @@ export class PurchaseService {
           total: itemTotal,
         });
 
-        // Calculate new average cost
+        // Use LATEST purchase price (no averaging)
         const currentStock = products[prodIndex].currentStock || 0;
-        const currentPrice = products[prodIndex].purchasePrice || 0;
-        const currentTotalCost = currentStock * currentPrice;
-        const newTotalCost = itemInput.quantity * itemInput.unitCost;
         const newTotalStock = currentStock + itemInput.quantity;
-        const newAveragePrice = newTotalStock > 0 
-          ? (currentTotalCost + newTotalCost) / newTotalStock 
-          : itemInput.unitCost;
 
-        // Add new stock with average cost
+        // Add new stock with LATEST price
         products[prodIndex] = {
           ...products[prodIndex],
           currentStock: newTotalStock,
-          purchasePrice: Number(newAveragePrice.toFixed(2)),
+          purchasePrice: Number(itemInput.unitCost.toFixed(2)), // ✅ Latest price
           updatedAt: new Date().toISOString(),
         };
 
