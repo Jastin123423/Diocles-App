@@ -71,6 +71,16 @@ export class SalesService {
       subtotal += itemTotal;
       totalCostOfGoods += itemInput.quantity * product.purchasePrice;
 
+      // 🔒 Snapshot the reference price at the exact moment of sale
+      const referencePrice =
+        product.proposedSellingPrice && product.proposedSellingPrice > 0
+          ? product.proposedSellingPrice
+          : product.sellingPrice || 0;
+      const referenceType: 'PROPOSED' | 'SELLING' =
+        product.proposedSellingPrice && product.proposedSellingPrice > 0
+          ? 'PROPOSED'
+          : 'SELLING';
+
       saleItems.push({
         id: generateUUID(),
         saleId: '',
@@ -83,6 +93,8 @@ export class SalesService {
         quantity: itemInput.quantity,
         discount: itemInput.discount || 0,
         total: Math.max(0, itemTotal),
+        referencePrice,
+        referenceType,
       });
     }
 
@@ -302,7 +314,7 @@ export class SalesService {
   ): { success: boolean; error?: string; requiresApproval?: boolean } {
     const sales = db.getSales();
     const sale = sales.find(s => s.id === saleId);
-    
+
     if (!sale) {
       return { success: false, error: 'Sale not found.' };
     }
@@ -318,17 +330,27 @@ export class SalesService {
     const products = db.getProducts();
     let newSubtotal = 0;
     let newCostOfGoods = 0;
-    
+
     const newSaleItems: SaleItem[] = newItems.map(itemInput => {
       const product = products.find(p => p.id === itemInput.productId);
       if (!product) {
         throw new Error(`Product not found: ${itemInput.productId}`);
       }
-      
+
       const itemTotal = itemInput.quantity * itemInput.unitPrice - (itemInput.discount || 0);
       newSubtotal += itemTotal;
       newCostOfGoods += itemInput.quantity * product.purchasePrice;
-      
+
+      // 🔒 Snapshot the reference price at the moment of the edit
+      const referencePrice =
+        product.proposedSellingPrice && product.proposedSellingPrice > 0
+          ? product.proposedSellingPrice
+          : product.sellingPrice || 0;
+      const referenceType: 'PROPOSED' | 'SELLING' =
+        product.proposedSellingPrice && product.proposedSellingPrice > 0
+          ? 'PROPOSED'
+          : 'SELLING';
+
       return {
         id: generateUUID(),
         saleId: sale.id,
@@ -341,6 +363,8 @@ export class SalesService {
         quantity: itemInput.quantity,
         discount: itemInput.discount || 0,
         total: Math.max(0, itemTotal),
+        referencePrice,
+        referenceType,
       };
     });
 
@@ -573,16 +597,16 @@ export class SalesService {
    */
   public static getSaleEditRequests(currentUser: User): SaleEditRequest[] {
     const requests = db.getSaleEditRequests?.() || [];
-    
+
     if (!Array.isArray(requests)) {
       console.warn('getSaleEditRequests: not an array');
       return [];
     }
-    
+
     if (currentUser.role === 'ADMIN') {
       return requests;
     }
-    
+
     return requests.filter(r => r.requestedByUserId === currentUser.id);
   }
 
