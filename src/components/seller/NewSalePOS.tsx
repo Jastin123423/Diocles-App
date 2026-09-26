@@ -13,6 +13,9 @@ import {
   Layers,
   CheckCircle,
   AlertTriangle,
+  ChevronDown,
+  Loader2,
+  TrendingUp,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { SalesService } from '../../services/salesService';
@@ -20,6 +23,8 @@ import { Product, PaymentMethod } from '../../types';
 import { formatCurrency } from '../../utils/formatters';
 import { ProductThumbnail } from '../common/ProductThumbnail';
 import { ProductImageViewerModal } from '../common/ProductImageViewerModal';
+
+const PAGE_SIZE = 15;
 
 interface CartItem {
   product: Product;
@@ -42,6 +47,10 @@ export const NewSalePOS: React.FC = () => {
   const [viewingProduct, setViewingProduct] = useState<Product | null>(null);
   const [isViewerOpen, setIsViewerOpen] = useState(false);
 
+  // Pagination state
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const settings = dbState.settings;
 
@@ -53,14 +62,41 @@ export const NewSalePOS: React.FC = () => {
     );
   }, [dbState.products, targetShopId]);
 
+  // ─────────────────────────────────────────────────────────────
+  // MOST-SELLING RANK MAP
+  // Count how many units of each product have been sold across all
+  // historical sales for the current shop. Returns a Map<productId, unitsSold>.
+  // ─────────────────────────────────────────────────────────────
+  const salesCountMap = useMemo(() => {
+    const map = new Map<string, number>();
+
+    const sales = dbState.sales || [];
+    for (const sale of sales) {
+      if (sale.status !== 'COMPLETED') continue;
+      if (targetShopId && sale.shopId !== targetShopId) continue;
+
+      for (const item of sale.items || []) {
+        const current = map.get(item.productId) || 0;
+        map.set(item.productId, current + (item.quantity || 0));
+      }
+    }
+
+    return map;
+  }, [dbState.sales, targetShopId]);
+
   const categories = useMemo(() => {
     const all = dbState.categories || [];
     if (targetShopId === 'ALL') return all;
     return all.filter(c => c.shopId === targetShopId);
   }, [dbState.categories, targetShopId]);
 
+  // ─────────────────────────────────────────────────────────────
+  // FILTER + SORT
+  // 1. Filter by category and search (UNCHANGED)
+  // 2. Sort: most-sold first, then by stock ascending, then by name
+  // ─────────────────────────────────────────────────────────────
   const filteredProducts = useMemo(() => {
-    return products.filter(p => {
+    const filtered = products.filter(p => {
       const matchesCategory = selectedCategory === 'ALL' || p.categoryId === selectedCategory;
       const q = searchQuery.toLowerCase().trim();
       const matchesSearch =
@@ -70,7 +106,40 @@ export const NewSalePOS: React.FC = () => {
         p.barcode.toLowerCase().includes(q);
       return matchesCategory && matchesSearch;
     });
-  }, [products, selectedCategory, searchQuery]);
+
+    // Most-selling first → tie-break by stock → then name
+    return [...filtered].sort((a, b) => {
+      const aSales = salesCountMap.get(a.id) || 0;
+      const bSales = salesCountMap.get(b.id) || 0;
+      if (bSales !== aSales) return bSales - aSales;
+
+      // Tie-break: products in stock come first, higher stock first
+      if (b.currentStock !== a.currentStock) return b.currentStock - a.currentStock;
+
+      return a.name.localeCompare(b.name);
+    });
+  }, [products, selectedCategory, searchQuery, salesCountMap]);
+
+  // Reset pagination when search/category changes
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [searchQuery, selectedCategory]);
+
+  const visibleProducts = filteredProducts.slice(0, visibleCount);
+  const hasMore = filteredProducts.length > visibleCount;
+  const remaining = filteredProducts.length - visibleCount;
+
+  const handleSeeMore = () => {
+    setIsLoadingMore(true);
+    setTimeout(() => {
+      setVisibleCount(prev => prev + PAGE_SIZE);
+      setIsLoadingMore(false);
+    }, 300);
+  };
+
+  const handleSeeLess = () => {
+    setVisibleCount(PAGE_SIZE);
+  };
 
   // ─────────────────────────────────────────────────────────────
   // Numeric coercion helpers
@@ -81,14 +150,12 @@ export const NewSalePOS: React.FC = () => {
     return Number.isFinite(parsed) ? parsed : 0;
   };
 
-  // 🔧 FIX: safe numeric coercion for price (float-capable)
   const priceNum = (p: number | string): number => {
     if (typeof p === 'number') return Number.isFinite(p) ? p : 0;
     const parsed = parseFloat(p);
     return Number.isFinite(parsed) ? parsed : 0;
   };
 
-  // Cart Calculations (safe when price is blank)
   const subtotal = useMemo(() => {
     return cart.reduce(
       (sum, item) => sum + qtyNum(item.quantity) * priceNum(item.unitPrice) - item.discount,
@@ -104,7 +171,6 @@ export const NewSalePOS: React.FC = () => {
   const tenderValue = parseFloat(amountReceived) || 0;
   const changeAmount = paymentMethod === 'CASH' ? Math.max(0, tenderValue - totalAmount) : 0;
 
-  // Auto-fill amount tendered when total changes (skips if seller is editing price)
   useEffect(() => {
     if (paymentMethod === 'CASH') {
       setAmountReceived(totalAmount.toFixed(2));
@@ -151,7 +217,6 @@ export const NewSalePOS: React.FC = () => {
     });
   };
 
-  // 🔧 FIX: allow blank string mid-edit for price
   const updateUnitPrice = (productId: string, rawValue: string) => {
     if (rawValue === '') {
       setCart(prev =>
@@ -173,7 +238,6 @@ export const NewSalePOS: React.FC = () => {
     );
   };
 
-  // 🔧 FIX: normalize blank/0 price back to the product's selling price on blur
   const handlePriceBlur = (productId: string) => {
     setCart(prev =>
       prev.map(i => {
@@ -295,7 +359,6 @@ export const NewSalePOS: React.FC = () => {
       return;
     }
 
-    // 🔧 FIX: reject blank / 0 prices before submitting
     const invalidPrice = cart.find(i => priceNum(i.unitPrice) <= 0);
     if (invalidPrice) {
       addToast({
@@ -325,7 +388,7 @@ export const NewSalePOS: React.FC = () => {
         items: cart.map(i => ({
           productId: i.product.id,
           quantity: qtyNum(i.quantity),
-          unitPrice: priceNum(i.unitPrice),   // 🔧 FIX: use safe price coercion
+          unitPrice: priceNum(i.unitPrice),
           discount: i.discount,
         })),
         paymentMethod,
@@ -417,6 +480,22 @@ export const NewSalePOS: React.FC = () => {
               );
             })}
           </div>
+
+          {/* Result count + hint */}
+          {filteredProducts.length > 0 && (
+            <div className="flex items-center justify-between text-[10px] text-slate-500">
+              <span className="flex items-center gap-1">
+                <TrendingUp className="w-3 h-3 text-emerald-400" />
+                Showing{' '}
+                <span className="text-slate-300 font-semibold">
+                  {Math.min(visibleCount, filteredProducts.length)}
+                </span>{' '}
+                of{' '}
+                <span className="text-slate-300 font-semibold">{filteredProducts.length}</span>{' '}
+                {searchQuery ? 'matching products' : '(top sellers first)'}
+              </span>
+            </div>
+          )}
         </div>
 
         {/* Product Grid */}
@@ -428,78 +507,139 @@ export const NewSalePOS: React.FC = () => {
               <p className="text-xs text-slate-600 mt-1">Try another category or scan a barcode.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-              {filteredProducts.map(product => {
-                const isOutOfStock = product.currentStock <= 0;
-                const isLowStock = product.currentStock > 0 && product.currentStock <= product.minStock;
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                {visibleProducts.map(product => {
+                  const isOutOfStock = product.currentStock <= 0;
+                  const isLowStock = product.currentStock > 0 && product.currentStock <= product.minStock;
+                  const unitsSold = salesCountMap.get(product.id) || 0;
 
-                return (
-                  <div
-                    key={product.id}
-                    id={`pos-product-${product.id}`}
-                    className={`p-2.5 rounded-xl border transition-all flex flex-col justify-between h-36 relative overflow-hidden group ${
-                      isOutOfStock
-                        ? 'bg-slate-900/40 border-slate-800/60 opacity-50'
-                        : 'bg-slate-900 border-slate-800 hover:border-blue-500/50 hover:bg-slate-850 hover:shadow-lg'
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-start justify-between gap-1 mb-1.5">
-                        <span className="text-[10px] font-mono text-slate-400">{product.sku}</span>
-                        {isOutOfStock ? (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30">
-                            Out of Stock
-                          </span>
-                        ) : isLowStock ? (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-semibold">
-                            {product.currentStock} {product.unit}
-                          </span>
-                        ) : (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400">
-                            {product.currentStock} {product.unit}
-                          </span>
-                        )}
+                  return (
+                    <div
+                      key={product.id}
+                      id={`pos-product-${product.id}`}
+                      className={`p-2.5 rounded-xl border transition-all flex flex-col justify-between h-36 relative overflow-hidden group ${
+                        isOutOfStock
+                          ? 'bg-slate-900/40 border-slate-800/60 opacity-50'
+                          : 'bg-slate-900 border-slate-800 hover:border-blue-500/50 hover:bg-slate-850 hover:shadow-lg'
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-start justify-between gap-1 mb-1.5">
+                          <div className="flex items-center gap-1 min-w-0 flex-1">
+                            <span className="text-[10px] font-mono text-slate-400 truncate">{product.sku}</span>
+                            {unitsSold > 0 && (
+                              <span
+                                className="text-[9px] px-1 py-0.2 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 font-bold shrink-0"
+                                title={`${unitsSold} units sold historically`}
+                              >
+                                🔥 {unitsSold}
+                              </span>
+                            )}
+                          </div>
+                          {isOutOfStock ? (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-400 border border-rose-500/30 shrink-0">
+                              Out of Stock
+                            </span>
+                          ) : isLowStock ? (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30 font-semibold shrink-0">
+                              {product.currentStock} {product.unit}
+                            </span>
+                          ) : (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 shrink-0">
+                              {product.currentStock} {product.unit}
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <ProductThumbnail
+                            product={product}
+                            size="sm"
+                            onClick={() => {
+                              setViewingProduct(product);
+                              setIsViewerOpen(true);
+                            }}
+                          />
+                          <h4
+                            onClick={() => !isOutOfStock && addToCart(product)}
+                            className={`text-xs font-semibold text-white line-clamp-2 transition flex-1 min-w-0 ${
+                              !isOutOfStock ? 'cursor-pointer group-hover:text-blue-300' : ''
+                            }`}
+                            title={product.name}
+                          >
+                            {product.name}
+                          </h4>
+                        </div>
                       </div>
 
-                      <div className="flex items-center gap-2">
-                        <ProductThumbnail
-                          product={product}
-                          size="sm"
-                          onClick={() => {
-                            setViewingProduct(product);
-                            setIsViewerOpen(true);
-                          }}
-                        />
-                        <h4
-                          onClick={() => !isOutOfStock && addToCart(product)}
-                          className={`text-xs font-semibold text-white line-clamp-2 transition flex-1 min-w-0 ${
-                            !isOutOfStock ? 'cursor-pointer group-hover:text-blue-300' : ''
-                          }`}
-                          title={product.name}
+                      <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-800/60">
+                        <span className="text-xs font-bold text-emerald-400 font-mono">
+                          {formatCurrency(product.sellingPrice, settings.currencySymbol)}
+                        </span>
+                        <button
+                          type="button"
+                          disabled={isOutOfStock}
+                          onClick={() => addToCart(product)}
+                          className="w-6 h-6 rounded-md bg-blue-600/20 hover:bg-blue-600 group-hover:bg-blue-600 text-blue-300 group-hover:text-white flex items-center justify-center transition disabled:opacity-30 disabled:cursor-not-allowed"
+                          title="Add to cart"
                         >
-                          {product.name}
-                        </h4>
+                          <Plus className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     </div>
+                  );
+                })}
+              </div>
 
-                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-800/60">
-                      <span className="text-xs font-bold text-emerald-400 font-mono">
-                        {formatCurrency(product.sellingPrice, settings.currencySymbol)}
-                      </span>
-                      <button
-                        type="button"
-                        disabled={isOutOfStock}
-                        onClick={() => addToCart(product)}
-                        className="w-6 h-6 rounded-md bg-blue-600/20 hover:bg-blue-600 group-hover:bg-blue-600 text-blue-300 group-hover:text-white flex items-center justify-center transition disabled:opacity-30 disabled:cursor-not-allowed"
-                        title="Add to cart"
-                      >
-                        <Plus className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
+              {/* See More / See Less Footer */}
+              {filteredProducts.length > PAGE_SIZE && (
+                <div className="mt-4 pt-4 border-t border-slate-800/60 flex items-center justify-between gap-3">
+                  <div className="text-[11px] text-slate-500">
+                    Showing{' '}
+                    <span className="text-slate-300 font-semibold">
+                      {Math.min(visibleCount, filteredProducts.length)}
+                    </span>{' '}
+                    of{' '}
+                    <span className="text-slate-300 font-semibold">
+                      {filteredProducts.length}
+                    </span>{' '}
+                    products
                   </div>
-                );
-              })}
-            </div>
+                  <div className="flex items-center gap-2">
+                    {visibleCount > PAGE_SIZE && (
+                      <button
+                        onClick={handleSeeLess}
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+                      >
+                        Show Less
+                      </button>
+                    )}
+                    {hasMore && (
+                      <button
+                        onClick={handleSeeMore}
+                        disabled={isLoadingMore}
+                        className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-xs font-semibold shadow transition disabled:opacity-60 disabled:cursor-wait"
+                      >
+                        {isLoadingMore ? (
+                          <>
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            <span>Loading...</span>
+                          </>
+                        ) : (
+                          <>
+                            <ChevronDown className="w-3.5 h-3.5" />
+                            <span>
+                              See More ({Math.min(PAGE_SIZE, remaining)} of {remaining})
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -587,7 +727,6 @@ export const NewSalePOS: React.FC = () => {
                   <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-900">
                     <div className="flex items-center gap-1.5">
                       <label className="text-[10px] text-slate-400">Price:</label>
-                      {/* 🔧 FIX: text input, allows blank state mid-edit; onBlur normalizes */}
                       <input
                         type="text"
                         inputMode="decimal"
@@ -634,7 +773,6 @@ export const NewSalePOS: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Non-blocking warning when selling below the reference price */}
                   {isBelowReference && (
                     <div className="flex items-center gap-1.5 text-[10px] font-semibold text-rose-400 bg-rose-500/10 px-2 py-1 rounded border border-rose-500/25 mt-1">
                       <AlertTriangle className="w-3 h-3 shrink-0" />
