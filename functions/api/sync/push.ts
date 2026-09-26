@@ -77,87 +77,67 @@ async function processOperation(db: any, op: any) {
     case 'TOGGLE_SHOP_STATUS':
       await upsertShop(db, payload);
       break;
-    
     case 'DELETE_SHOP':
       await deleteShop(db, payload);
       break;
-    
     case 'CREATE_PRODUCT':
     case 'UPDATE_PRODUCT':
     case 'TOGGLE_PRODUCT_STATUS':
       await upsertProduct(db, payload);
       break;
-    
     case 'DELETE_PRODUCT':
       await deleteProduct(db, payload);
       break;
-    
     case 'CREATE_CATEGORY':
     case 'UPDATE_CATEGORY':
       await upsertCategory(db, payload);
       break;
-    
     case 'CREATE_SALE':
       await createSale(db, payload);
       break;
-    
     case 'UPDATE_SALE':
       await updateSale(db, payload);
       break;
-    
     case 'VOID_SALE':
       await voidSale(db, payload);
       break;
-    
     case 'CREATE_PURCHASE':
       await createPurchase(db, payload);
       break;
-    
     case 'UPDATE_PURCHASE':
       await updatePurchase(db, payload);
       break;
-    
     case 'CREATE_EXPENSE':
       await createExpense(db, payload);
       break;
-    
     case 'CREATE_SELLER':
     case 'UPDATE_SELLER':
       await upsertUser(db, payload);
       break;
-    
     case 'DELETE_SELLER':
       await deleteSeller(db, payload);
       break;
-    
     case 'STOCK_ADJUSTMENT':
       await recordStockAdjustment(db, payload);
       break;
-    
     case 'UPDATE_SETTINGS':
       await updateSettings(db, payload);
       break;
-    
     case 'CREATE_DEBT':
       await createDebt(db, payload);
       break;
-    
     case 'UPDATE_DEBT':
       await updateDebt(db, payload);
       break;
-    
     case 'DELETE_DEBT':
       await deleteDebt(db, payload);
       break;
-    
     case 'CREATE_SALE_EDIT_REQUEST':
       await createSaleEditRequest(db, payload);
       break;
-    
     case 'REVIEW_SALE_EDIT_REQUEST':
       await reviewSaleEditRequest(db, payload);
       break;
-    
     default:
       throw new Error(`Unknown operation: ${operation}`);
   }
@@ -251,7 +231,6 @@ async function upsertProduct(db: any, product: any) {
   if (product.images && Array.isArray(product.images) && product.images.length > 0) {
     for (let i = 0; i < product.images.length; i++) {
       const img = product.images[i];
-      
       await db.prepare(`
         INSERT INTO product_images (
           image_id, product_id, image_order, version, r2_key,
@@ -308,7 +287,6 @@ async function upsertCategory(db: any, category: any) {
 
 async function createSale(db: any, sale: any) {
   const now = new Date().toISOString();
-  
   await db.prepare(`
     INSERT INTO sales (
       id, receipt_number, shop_id, shop_name, seller_id, seller_name,
@@ -339,81 +317,45 @@ async function createSale(db: any, sale: any) {
       item.id || crypto.randomUUID(), sale.id, item.shopId || sale.shopId,
       item.productId, item.productName, item.sku, item.unitPrice || 0,
       item.purchasePrice || 0, item.quantity || 0, item.discount || 0, item.total || 0,
-      item.referencePrice ?? null,
-      item.referenceType ?? null
+      item.referencePrice ?? null, item.referenceType ?? null
     ).run();
 
     await db.prepare(`
-      UPDATE products 
-      SET current_stock = current_stock - ?,
-          updated_at = ?
-      WHERE id = ?
-    `).bind(
-      item.quantity || 0,
-      new Date().toISOString(),
-      item.productId
-    ).run();
+      UPDATE products SET current_stock = current_stock - ?, updated_at = ? WHERE id = ?
+    `).bind(item.quantity || 0, new Date().toISOString(), item.productId).run();
   }
 }
 
 async function updateSale(db: any, sale: any) {
   console.log('[updateSale] Updating sale:', sale.id);
-  console.log('[updateSale] Items:', sale.items?.length);
-  
+
   const oldSaleItems = await db.prepare(
     'SELECT product_id, quantity FROM sale_items WHERE sale_id = ?'
   ).bind(sale.id).all();
-  console.log('[updateSale] Old items found:', oldSaleItems.results?.length);
 
   if (oldSaleItems.results) {
     for (const oldItem of oldSaleItems.results) {
-      console.log('[updateSale] Reversing stock for:', oldItem.product_id, 'qty:', oldItem.quantity);
-      
       await db.prepare(`
-        UPDATE products 
-        SET current_stock = current_stock + ?,
-            updated_at = ?
-        WHERE id = ?
-      `).bind(
-        oldItem.quantity || 0,
-        new Date().toISOString(),
-        oldItem.product_id
-      ).run();
+        UPDATE products SET current_stock = current_stock + ?, updated_at = ? WHERE id = ?
+      `).bind(oldItem.quantity || 0, new Date().toISOString(), oldItem.product_id).run();
     }
   }
 
   await db.prepare('DELETE FROM sale_items WHERE sale_id = ?').bind(sale.id).run();
-  console.log('[updateSale] Old items deleted');
 
   await db.prepare(`
     UPDATE sales SET
-      subtotal = ?,
-      discount = ?,
-      total = ?,
-      cost_of_goods = ?,
-      gross_profit = ?,
-      amount_received = ?,
-      change = ?,
-      notes = ?,
-      updated_at = ?
+      subtotal = ?, discount = ?, total = ?, cost_of_goods = ?, gross_profit = ?,
+      amount_received = ?, change = ?, notes = ?, updated_at = ?
     WHERE id = ?
   `).bind(
-    sale.subtotal || 0,
-    sale.discount || 0,
-    sale.total || 0,
-    sale.costOfGoods || 0,
-    sale.grossProfit || 0,
-    sale.amountReceived || 0,
-    sale.change || 0,
-    sale.notes || null,
-    new Date().toISOString(),
-    sale.id
+    sale.subtotal || 0, sale.discount || 0, sale.total || 0,
+    sale.costOfGoods || 0, sale.grossProfit || 0,
+    sale.amountReceived || 0, sale.change || 0, sale.notes || null,
+    new Date().toISOString(), sale.id
   ).run();
-  console.log('[updateSale] Sale metadata updated');
 
   for (const item of (sale.items || [])) {
-    console.log('[updateSale] Inserting item:', item.id, 'product:', item.productId, 'qty:', item.quantity);
-    
     await db.prepare(`
       INSERT INTO sale_items (
         id, sale_id, shop_id, product_id, product_name, sku,
@@ -423,83 +365,36 @@ async function updateSale(db: any, sale: any) {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO NOTHING
     `).bind(
-      item.id || crypto.randomUUID(), 
-      sale.id, 
-      item.shopId || sale.shopId,
-      item.productId, 
-      item.productName, 
-      item.sku, 
-      item.unitPrice || 0,
-      item.purchasePrice || 0, 
-      item.quantity || 0, 
-      item.discount || 0, 
-      item.total || 0,
-      item.referencePrice ?? null,
-      item.referenceType ?? null
+      item.id || crypto.randomUUID(), sale.id, item.shopId || sale.shopId,
+      item.productId, item.productName, item.sku, item.unitPrice || 0,
+      item.purchasePrice || 0, item.quantity || 0, item.discount || 0, item.total || 0,
+      item.referencePrice ?? null, item.referenceType ?? null
     ).run();
 
-    console.log('[updateSale] Subtracting stock for:', item.productId, 'qty:', item.quantity);
-    
-    const product = await db.prepare(
-      'SELECT current_stock FROM products WHERE id = ?'
-    ).bind(item.productId).first();
-    
-    if (product) {
-      console.log('[updateSale] Stock before:', product.current_stock);
-      
-      await db.prepare(`
-        UPDATE products 
-        SET current_stock = current_stock - ?,
-            updated_at = ?
-        WHERE id = ?
-      `).bind(
-        item.quantity || 0,
-        new Date().toISOString(),
-        item.productId
-      ).run();
-      
-      const afterProduct = await db.prepare(
-        'SELECT current_stock FROM products WHERE id = ?'
-      ).bind(item.productId).first();
-      
-      console.log('[updateSale] Stock after:', afterProduct?.current_stock);
-    } else {
-      console.log('[updateSale] Product NOT found:', item.productId);
-    }
+    await db.prepare(`
+      UPDATE products SET current_stock = current_stock - ?, updated_at = ? WHERE id = ?
+    `).bind(item.quantity || 0, new Date().toISOString(), item.productId).run();
   }
-  
-  console.log('[updateSale] Completed for sale:', sale.id);
 }
 
 async function voidSale(db: any, payload: any) {
   const saleId = payload.saleId || payload.id;
-  
+
   const saleItems = await db.prepare(
     'SELECT product_id, quantity FROM sale_items WHERE sale_id = ?'
   ).bind(saleId).all();
-  
+
   if (saleItems.results) {
     for (const item of saleItems.results) {
       await db.prepare(`
-        UPDATE products 
-        SET current_stock = current_stock + ?,
-            updated_at = ?
-        WHERE id = ?
-      `).bind(
-        item.quantity || 0,
-        new Date().toISOString(),
-        item.product_id
-      ).run();
+        UPDATE products SET current_stock = current_stock + ?, updated_at = ? WHERE id = ?
+      `).bind(item.quantity || 0, new Date().toISOString(), item.product_id).run();
     }
   }
-  
+
   await db.prepare(`
     UPDATE sales SET
-      status = 'VOIDED',
-      void_reason = ?,
-      voided_at = ?,
-      voided_by = ?,
-      updated_at = ?
+      status = 'VOIDED', void_reason = ?, voided_at = ?, voided_by = ?, updated_at = ?
     WHERE id = ?
   `).bind(
     payload.voidReason || '',
@@ -511,8 +406,6 @@ async function voidSale(db: any, payload: any) {
 }
 
 async function createPurchase(db: any, purchase: any) {
-  console.log('[createPurchase] Creating purchase:', purchase.id);
-  
   await db.prepare(`
     INSERT INTO purchases (
       id, purchase_number, shop_id, shop_name, supplier_name, date,
@@ -549,19 +442,9 @@ async function createPurchase(db: any, purchase: any) {
       const newUnitCost = Number(item.unitCost) || 0;
       const newTotalStock = currentStock + newPurchaseQty;
 
-      // ✅ LATEST PURCHASE PRICE (no averaging)
       await db.prepare(`
-        UPDATE products 
-        SET current_stock = ?, 
-            purchase_price = ?,
-            updated_at = ?
-        WHERE id = ?
-      `).bind(
-        newTotalStock,
-        Number(newUnitCost.toFixed(2)),   // ✅ Latest price only
-        new Date().toISOString(),
-        item.productId
-      ).run();
+        UPDATE products SET current_stock = ?, purchase_price = ?, updated_at = ? WHERE id = ?
+      `).bind(newTotalStock, Number(newUnitCost.toFixed(2)), new Date().toISOString(), item.productId).run();
 
       await db.prepare(`
         INSERT INTO inventory_movements (
@@ -572,26 +455,14 @@ async function createPurchase(db: any, purchase: any) {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO NOTHING
       `).bind(
-        crypto.randomUUID(),
-        purchase.shopId,
-        purchase.shopName || null,
-        item.productId,
-        item.productName,
-        currentStock,
-        newPurchaseQty,
-        newTotalStock,
-        'PURCHASE',
-        `Purchase from ${purchase.supplierName}`,
-        newUnitCost,
-        purchase.id,
-        purchase.createdByUserId,
-        purchase.createdByName,
+        crypto.randomUUID(), purchase.shopId, purchase.shopName || null,
+        item.productId, item.productName, currentStock, newPurchaseQty, newTotalStock,
+        'PURCHASE', `Purchase from ${purchase.supplierName}`, newUnitCost,
+        purchase.id, purchase.createdByUserId, purchase.createdByName,
         purchase.createdAt || new Date().toISOString()
       ).run();
     }
   }
-  
-  console.log('[createPurchase] Purchase created:', purchase.id);
 }
 
 async function updatePurchase(db: any, purchase: any) {
@@ -602,35 +473,19 @@ async function updatePurchase(db: any, purchase: any) {
   if (oldPurchase.results) {
     for (const oldItem of oldPurchase.results) {
       await db.prepare(`
-        UPDATE products 
-        SET current_stock = current_stock - ?,
-            updated_at = ?
-        WHERE id = ?
-      `).bind(
-        oldItem.quantity || 0, 
-        new Date().toISOString(), 
-        oldItem.product_id
-      ).run();
+        UPDATE products SET current_stock = current_stock - ?, updated_at = ? WHERE id = ?
+      `).bind(oldItem.quantity || 0, new Date().toISOString(), oldItem.product_id).run();
     }
   }
 
   await db.prepare('DELETE FROM purchase_items WHERE purchase_id = ?').bind(purchase.id).run();
 
   await db.prepare(`
-    UPDATE purchases SET
-      supplier_name = ?,
-      invoice_number = ?,
-      payment_status = ?,
-      notes = ?,
-      total_amount = ?
-    WHERE id = ?
+    UPDATE purchases SET supplier_name = ?, invoice_number = ?, payment_status = ?, notes = ?, total_amount = ? WHERE id = ?
   `).bind(
-    purchase.supplierName,
-    purchase.invoiceNumber || null,
-    purchase.paymentStatus || 'PAID',
-    purchase.notes || null,
-    purchase.totalAmount || 0,
-    purchase.id
+    purchase.supplierName, purchase.invoiceNumber || null,
+    purchase.paymentStatus || 'PAID', purchase.notes || null,
+    purchase.totalAmount || 0, purchase.id
   ).run();
 
   for (const item of (purchase.items || [])) {
@@ -639,13 +494,8 @@ async function updatePurchase(db: any, purchase: any) {
       VALUES (?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO NOTHING
     `).bind(
-      item.id || crypto.randomUUID(), 
-      purchase.id, 
-      item.productId, 
-      item.productName,
-      item.quantity || 0, 
-      item.unitCost || 0, 
-      item.total || 0
+      item.id || crypto.randomUUID(), purchase.id, item.productId, item.productName,
+      item.quantity || 0, item.unitCost || 0, item.total || 0
     ).run();
 
     const product = await db.prepare(
@@ -658,26 +508,14 @@ async function updatePurchase(db: any, purchase: any) {
       const newUnitCost = Number(item.unitCost) || 0;
       const newTotalStock = currentStock + newPurchaseQty;
 
-      // ✅ LATEST PURCHASE PRICE (no averaging)
       await db.prepare(`
-        UPDATE products 
-        SET current_stock = ?,
-            purchase_price = ?,
-            updated_at = ?
-        WHERE id = ?
-      `).bind(
-        newTotalStock,
-        Number(newUnitCost.toFixed(2)),   // ✅ Latest price only
-        new Date().toISOString(),
-        item.productId
-      ).run();
+        UPDATE products SET current_stock = ?, purchase_price = ?, updated_at = ? WHERE id = ?
+      `).bind(newTotalStock, Number(newUnitCost.toFixed(2)), new Date().toISOString(), item.productId).run();
     }
   }
 }
 
 async function createSaleEditRequest(db: any, request: any) {
-  console.log('[createSaleEditRequest] Creating:', request.id);
-  
   await db.prepare(`
     INSERT INTO sale_edit_requests (
       id, sale_id, requested_by_user_id, requested_by_name,
@@ -688,39 +526,29 @@ async function createSaleEditRequest(db: any, request: any) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO NOTHING
   `).bind(
-    request.id,
-    request.saleId,
-    request.requestedByUserId,
-    request.requestedByName,
-    JSON.stringify(request.originalValues),
-    JSON.stringify(request.newValues),
-    request.reason,
-    request.status || 'PENDING',
-    request.reviewedByUserId || null,
-    request.reviewedByName || null,
+    request.id, request.saleId, request.requestedByUserId, request.requestedByName,
+    JSON.stringify(request.originalValues), JSON.stringify(request.newValues),
+    request.reason, request.status || 'PENDING',
+    request.reviewedByUserId || null, request.reviewedByName || null,
     request.reviewNote || null,
     request.createdAt || new Date().toISOString(),
     request.reviewedAt || null
   ).run();
-  
-  console.log('[createSaleEditRequest] Created:', request.id);
 }
 
 async function reviewSaleEditRequest(db: any, request: any) {
   console.log('[reviewSaleEditRequest] Reviewing:', request.id, 'status:', request.status);
-  
+
   if (!request.id) {
-    console.error('[reviewSaleEditRequest] ERROR: No ID in request');
+    console.error('[reviewSaleEditRequest] ERROR: No ID');
     return;
   }
-  
+
+  // STEP 1: update request row
   await db.prepare(`
     UPDATE sale_edit_requests SET
-      status = ?,
-      reviewed_by_user_id = ?,
-      reviewed_by_name = ?,
-      review_note = ?,
-      reviewed_at = ?
+      status = ?, reviewed_by_user_id = ?, reviewed_by_name = ?,
+      review_note = ?, reviewed_at = ?
     WHERE id = ?
   `).bind(
     request.status || 'PENDING',
@@ -730,8 +558,76 @@ async function reviewSaleEditRequest(db: any, request: any) {
     request.reviewedAt || new Date().toISOString(),
     request.id
   ).run();
-  
-  console.log('[reviewSaleEditRequest] Updated:', request.id, 'to status:', request.status);
+
+  // STEP 2: if approved, apply the new values to sale + items
+  if (request.status === 'APPROVED') {
+    const editRequest = await db.prepare(
+      'SELECT * FROM sale_edit_requests WHERE id = ?'
+    ).bind(request.id).first();
+
+    if (editRequest) {
+      const newValues =
+        typeof editRequest.new_values === 'string'
+          ? JSON.parse(editRequest.new_values)
+          : editRequest.new_values;
+
+      const saleId = editRequest.sale_id;
+      const now = new Date().toISOString();
+
+      // Reverse old stock
+      const oldItems = await db.prepare(
+        'SELECT product_id, quantity FROM sale_items WHERE sale_id = ?'
+      ).bind(saleId).all();
+
+      if (oldItems.results) {
+        for (const oi of oldItems.results) {
+          await db.prepare(`
+            UPDATE products SET current_stock = current_stock + ?, updated_at = ? WHERE id = ?
+          `).bind(oi.quantity || 0, now, oi.product_id).run();
+        }
+      }
+
+      await db.prepare('DELETE FROM sale_items WHERE sale_id = ?').bind(saleId).run();
+
+      // Insert new sale_items + subtract stock
+      for (const item of newValues.items || []) {
+        await db.prepare(`
+          INSERT INTO sale_items (
+            id, sale_id, shop_id, product_id, product_name, sku,
+            unit_price, purchase_price, quantity, discount, total,
+            reference_price, reference_type
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+          item.id || crypto.randomUUID(), saleId, item.shopId || null,
+          item.productId, item.productName, item.sku,
+          item.unitPrice || 0, item.purchasePrice || 0,
+          item.quantity || 0, item.discount || 0, item.total || 0,
+          item.referencePrice ?? null, item.referenceType ?? null
+        ).run();
+
+        await db.prepare(`
+          UPDATE products SET current_stock = current_stock - ?, updated_at = ? WHERE id = ?
+        `).bind(item.quantity || 0, now, item.productId).run();
+      }
+
+      // Update sales row + new updated_at
+      await db.prepare(`
+        UPDATE sales SET
+          subtotal = ?, discount = ?, total = ?,
+          cost_of_goods = ?, gross_profit = ?,
+          amount_received = ?, change = ?, updated_at = ?
+        WHERE id = ?
+      `).bind(
+        newValues.subtotal || 0, newValues.discount || 0, newValues.total || 0,
+        newValues.costOfGoods || 0, newValues.grossProfit || 0,
+        newValues.amountReceived || 0, newValues.change || 0,
+        now, saleId
+      ).run();
+
+      console.log('[reviewSaleEditRequest] ✅ Applied edit to sale:', saleId);
+    }
+  }
 }
 
 async function createExpense(db: any, expense: any) {
@@ -761,28 +657,19 @@ async function upsertUser(db: any, user: any) {
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
-      username = excluded.username,
-      name = excluded.name,
-      role = excluded.role,
-      password_hash = excluded.password_hash,
-      color = excluded.color,
-      status = excluded.status,
-      assigned_shop_ids = excluded.assigned_shop_ids,
-      avatar_url = excluded.avatar_url,
-      permissions = excluded.permissions,
+      username = excluded.username, name = excluded.name, role = excluded.role,
+      password_hash = excluded.password_hash, color = excluded.color,
+      status = excluded.status, assigned_shop_ids = excluded.assigned_shop_ids,
+      avatar_url = excluded.avatar_url, permissions = excluded.permissions,
       updated_at = excluded.updated_at
   `).bind(
-    user.id, 
-    user.username || user.id, 
-    user.name, 
-    user.role || 'SELLER',
+    user.id, user.username || user.id, user.name, user.role || 'SELLER',
     user.passwordHash || user.password_hash || '',
-    user.color || 'blue', 
-    user.status || 'ACTIVE',
+    user.color || 'blue', user.status || 'ACTIVE',
     JSON.stringify(user.assignedShopIds || []),
     user.avatarUrl || user.avatar_url || null,
     JSON.stringify(user.permissions || {}),
-    user.createdAt || new Date().toISOString(), 
+    user.createdAt || new Date().toISOString(),
     user.updatedAt || new Date().toISOString()
   ).run();
 }
@@ -812,36 +699,19 @@ async function recordStockAdjustment(db: any, movement: any) {
 async function updateSettings(db: any, settings: any) {
   await db.prepare(`
     UPDATE settings SET
-      business_name = ?,
-      tagline = ?,
-      address = ?,
-      phone = ?,
-      email = ?,
-      currency_symbol = ?,
-      currency_code = ?,
-      tax_rate_percent = ?,
-      enable_tax = ?,
-      receipt_header_note = ?,
-      receipt_footer_note = ?,
-      receipt_paper_width = ?,
-      low_stock_threshold_default = ?,
-      updated_at = ?
+      business_name = ?, tagline = ?, address = ?, phone = ?, email = ?,
+      currency_symbol = ?, currency_code = ?, tax_rate_percent = ?, enable_tax = ?,
+      receipt_header_note = ?, receipt_footer_note = ?, receipt_paper_width = ?,
+      low_stock_threshold_default = ?, updated_at = ?
     WHERE id = 'global'
   `).bind(
     settings.businessName || 'Diocres Hardware&Retail Solutions',
-    settings.tagline || null,
-    settings.address || null,
-    settings.phone || null,
-    settings.email || null,
-    settings.currencySymbol || 'TSh',
-    settings.currencyCode || 'TZS',
-    settings.taxRatePercent || 0,
-    settings.enableTax ? 1 : 0,
-    settings.receiptHeaderNote || null,
-    settings.receiptFooterNote || null,
-    settings.receiptPaperWidth || '80mm',
-    settings.lowStockThresholdDefault || 5,
-    new Date().toISOString()
+    settings.tagline || null, settings.address || null, settings.phone || null,
+    settings.email || null, settings.currencySymbol || 'TSh',
+    settings.currencyCode || 'TZS', settings.taxRatePercent || 0,
+    settings.enableTax ? 1 : 0, settings.receiptHeaderNote || null,
+    settings.receiptFooterNote || null, settings.receiptPaperWidth || '80mm',
+    settings.lowStockThresholdDefault || 5, new Date().toISOString()
   ).run();
 }
 
@@ -854,16 +724,11 @@ async function createDebt(db: any, debt: any) {
     )
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
-      type = excluded.type,
-      debtor_name = excluded.debtor_name,
-      product_description = excluded.product_description,
-      amount = excluded.amount,
-      paid_amount = excluded.paid_amount,
-      remaining_amount = excluded.remaining_amount,
-      due_date = excluded.due_date,
-      contact = excluded.contact,
-      notes = excluded.notes,
-      status = excluded.status,
+      type = excluded.type, debtor_name = excluded.debtor_name,
+      product_description = excluded.product_description, amount = excluded.amount,
+      paid_amount = excluded.paid_amount, remaining_amount = excluded.remaining_amount,
+      due_date = excluded.due_date, contact = excluded.contact,
+      notes = excluded.notes, status = excluded.status,
       updated_at = excluded.updated_at
   `).bind(
     debt.id, debt.type, debt.debtorName, debt.productDescription || null,
@@ -878,17 +743,9 @@ async function createDebt(db: any, debt: any) {
 async function updateDebt(db: any, debt: any) {
   await db.prepare(`
     UPDATE debts SET
-      type = ?,
-      debtor_name = ?,
-      product_description = ?,
-      amount = ?,
-      paid_amount = ?,
-      remaining_amount = ?,
-      due_date = ?,
-      contact = ?,
-      notes = ?,
-      status = ?,
-      updated_at = ?
+      type = ?, debtor_name = ?, product_description = ?, amount = ?,
+      paid_amount = ?, remaining_amount = ?, due_date = ?, contact = ?,
+      notes = ?, status = ?, updated_at = ?
     WHERE id = ?
   `).bind(
     debt.type, debt.debtorName, debt.productDescription || null,
