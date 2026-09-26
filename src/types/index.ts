@@ -118,6 +118,13 @@ export interface SaleItem {
   quantity: number;
   discount: number;
   total: number;
+
+  // ─── Reference price snapshot (immutable at sale time) ───
+  // Captured when the sale was created so that price-deviation
+  // reports compare against what the seller actually saw, not
+  // against whatever the product price is today.
+  referencePrice?: number;
+  referenceType?: 'PROPOSED' | 'SELLING';
 }
 
 export interface Sale {
