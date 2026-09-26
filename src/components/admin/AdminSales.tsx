@@ -26,6 +26,8 @@ import { db } from '../../db/storage';
 import { Sale, SaleEditRequest } from '../../types';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 
+type DatePreset = 'TODAY' | 'WEEK' | 'MONTH' | 'CUSTOM';
+
 export const AdminSales: React.FC = () => {
   const { currentUser, showReceipt, dbState, addToast } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
@@ -33,6 +35,7 @@ export const AdminSales: React.FC = () => {
   const [paymentFilter, setPaymentFilter] = useState('ALL');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [shopFilter, setShopFilter] = useState('ALL');
+  const [datePreset, setDatePreset] = useState<DatePreset>('TODAY');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [isPrinting, setIsPrinting] = useState(false);
@@ -52,41 +55,91 @@ export const AdminSales: React.FC = () => {
   // Show pending edit requests
   const [showEditRequests, setShowEditRequests] = useState(false);
 
+  // ---------- Date helpers ----------
+  const toYMD = (d: Date): string => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const computePresetRange = (
+    preset: DatePreset
+  ): { start: string; end: string } | null => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (preset === 'TODAY') {
+      return { start: toYMD(today), end: toYMD(today) };
+    }
+
+    if (preset === 'WEEK') {
+      const start = new Date(today);
+      start.setDate(start.getDate() - 6); // last 7 days rolling
+      return { start: toYMD(start), end: toYMD(today) };
+    }
+
+    if (preset === 'MONTH') {
+      const start = new Date(today.getFullYear(), today.getMonth(), 1);
+      return { start: toYMD(start), end: toYMD(today) };
+    }
+
+    return null; // CUSTOM
+  };
+
+  // Apply preset → compute start/end (except CUSTOM)
+  useEffect(() => {
+    if (datePreset === 'CUSTOM') return;
+    const range = computePresetRange(datePreset);
+    if (range) {
+      setStartDate(range.start);
+      setEndDate(range.end);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [datePreset]);
+
   // Permission check: Admin OR Seller with canEditSales/canDeleteSales
   if (!currentUser) return null;
-  if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canEditSales && !currentUser.permissions?.canDeleteSales) return null;
+  if (
+    currentUser.role !== 'ADMIN' &&
+    !currentUser.permissions?.canEditSales &&
+    !currentUser.permissions?.canDeleteSales
+  )
+    return null;
 
   // Permission flags
   const canEditSale = currentUser.role === 'ADMIN' || currentUser.permissions?.canEditSales;
   const canVoidSale = currentUser.role === 'ADMIN' || currentUser.permissions?.canDeleteSales;
   const isAdmin = currentUser.role === 'ADMIN';
 
-  // FIX: Force pull when component mounts to get latest sale edit requests
+  // Force pull on mount
   useEffect(() => {
     const forcePull = async () => {
       try {
         const online = await CloudflareApi.checkConnection();
         if (!online) return;
-        
+
         console.log('[AdminSales] Pulling latest sale edit requests...');
         const pullResult = await CloudflareApi.pullSync();
-        
+
         if (pullResult.success && pullResult.data) {
           SyncService.applyCloudData(pullResult.data);
-          
-          // Force re-render
+
           const state = db.getState();
-          console.log('[AdminSales] Pull completed, edit requests:', state.saleEditRequests?.length || 0);
+          console.log(
+            '[AdminSales] Pull completed, edit requests:',
+            state.saleEditRequests?.length || 0
+          );
         }
       } catch (error) {
         console.log('[AdminSales] Pull error:', error);
       }
     };
-    
+
     forcePull();
   }, []);
 
-  // FIX: Manual refresh function
+  // Manual refresh
   const refreshEditRequests = async () => {
     setIsRefreshing(true);
     try {
@@ -95,7 +148,7 @@ export const AdminSales: React.FC = () => {
         addToast({ type: 'error', title: 'Offline', description: 'Cannot refresh while offline.' });
         return;
       }
-      
+
       const pullResult = await CloudflareApi.pullSync();
       if (pullResult.success && pullResult.data) {
         SyncService.applyCloudData(pullResult.data);
@@ -132,7 +185,8 @@ export const AdminSales: React.FC = () => {
   const totalVolume = sales.reduce((sum, s) => (s.status === 'COMPLETED' ? sum + s.total : sum), 0);
   const totalProfit = sales.reduce((sum, s) => (s.status === 'COMPLETED' ? sum + s.grossProfit : sum), 0);
 
-  const selectedShopName = shopFilter === 'ALL' ? 'All Shops' : (shops.find(s => s.id === shopFilter)?.name || 'Unknown Shop');
+  const selectedShopName =
+    shopFilter === 'ALL' ? 'All Shops' : shops.find(s => s.id === shopFilter)?.name || 'Unknown Shop';
 
   const handleExecuteVoid = () => {
     if (!voidingSale || !currentUser) return;
@@ -166,7 +220,6 @@ export const AdminSales: React.FC = () => {
     }
   };
 
-  // Open edit sale modal
   const openEditSale = (sale: Sale) => {
     setEditingSale(sale);
     setEditItems(
@@ -180,7 +233,6 @@ export const AdminSales: React.FC = () => {
     setEditReason('');
   };
 
-  // Handle save edit
   const handleSaveEdit = () => {
     if (!editingSale || !currentUser) return;
 
@@ -197,8 +249,8 @@ export const AdminSales: React.FC = () => {
       addToast({
         type: 'success',
         title: result.requiresApproval ? 'Edit Request Sent' : 'Sale Edited Successfully',
-        description: result.requiresApproval 
-          ? 'Your edit request has been sent for admin approval.' 
+        description: result.requiresApproval
+          ? 'Your edit request has been sent for admin approval.'
           : `Receipt #${editingSale.receiptNumber} updated. Stock recalculated.`,
       });
       setEditingSale(null);
@@ -213,7 +265,6 @@ export const AdminSales: React.FC = () => {
     }
   };
 
-  // Handle review edit request
   const handleReviewRequest = (request: SaleEditRequest, action: 'APPROVE' | 'REJECT') => {
     if (!currentUser) return;
 
@@ -224,9 +275,10 @@ export const AdminSales: React.FC = () => {
       addToast({
         type: 'success',
         title: action === 'APPROVE' ? 'Edit Approved' : 'Edit Rejected',
-        description: action === 'APPROVE' 
-          ? 'Sale edit approved. Stock recalculated.' 
-          : 'Sale edit request rejected.',
+        description:
+          action === 'APPROVE'
+            ? 'Sale edit approved. Stock recalculated.'
+            : 'Sale edit request rejected.',
       });
     } else {
       addToast({
@@ -237,10 +289,9 @@ export const AdminSales: React.FC = () => {
     }
   };
 
-  // Print Sales Report
   const handlePrint = () => {
     setIsPrinting(true);
-    
+
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
     if (!printWindow) {
       addToast({ type: 'error', title: 'Popup Blocked', description: 'Please allow popups to print.' });
@@ -334,7 +385,7 @@ export const AdminSales: React.FC = () => {
                 <td>${sale.shopName || 'N/A'}</td>
                 <td>${sale.sellerName}</td>
                 <td class="items-list">
-                  ${(sale.items || []).map(item => 
+                  ${(sale.items || []).map(item =>
                     `<span class="item-tag">${item.quantity}x ${item.productName}</span>`
                   ).join('')}
                 </td>
@@ -359,16 +410,15 @@ export const AdminSales: React.FC = () => {
 
     printWindow.document.write(printContent);
     printWindow.document.close();
-    
+
     setTimeout(() => setIsPrinting(false), 2000);
   };
 
-  // Export CSV
   const handleExportCSV = () => {
     let csv = `Sales Report - ${selectedShopName}\n`;
     csv += `Generated: ${new Date().toLocaleString()}\n\n`;
     csv += `Receipt #,Date,Shop,Seller,Products,Payment,Status,Total,Profit\n`;
-    
+
     sales.forEach(sale => {
       const products = (sale.items || []).map(i => `${i.quantity}x ${i.productName}`).join('; ');
       csv += `"${sale.receiptNumber}","${formatDateTime(sale.createdAt)}","${sale.shopName || ''}","${sale.sellerName}","${products}","${sale.paymentMethod}","${sale.status}",${sale.total},${sale.status === 'COMPLETED' ? sale.grossProfit : 0}\n`;
@@ -382,6 +432,43 @@ export const AdminSales: React.FC = () => {
     link.click();
     URL.revokeObjectURL(url);
   };
+
+  const hasActiveFilters =
+    searchQuery ||
+    sellerFilter !== 'ALL' ||
+    paymentFilter !== 'ALL' ||
+    statusFilter !== 'ALL' ||
+    shopFilter !== 'ALL' ||
+    datePreset !== 'TODAY' ||
+    (datePreset === 'CUSTOM' && (startDate || endDate));
+
+  // Colored presets config
+  const presets: { id: DatePreset; label: string; activeClass: string; idleClass: string }[] = [
+    {
+      id: 'TODAY',
+      label: 'Today',
+      activeClass: 'bg-blue-600 border-blue-500 text-white shadow-md shadow-blue-500/30',
+      idleClass: 'bg-blue-500/10 border-blue-500/30 text-blue-300 hover:bg-blue-500/20',
+    },
+    {
+      id: 'WEEK',
+      label: 'Week',
+      activeClass: 'bg-emerald-600 border-emerald-500 text-white shadow-md shadow-emerald-500/30',
+      idleClass: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20',
+    },
+    {
+      id: 'MONTH',
+      label: 'Month',
+      activeClass: 'bg-violet-600 border-violet-500 text-white shadow-md shadow-violet-500/30',
+      idleClass: 'bg-violet-500/10 border-violet-500/30 text-violet-300 hover:bg-violet-500/20',
+    },
+    {
+      id: 'CUSTOM',
+      label: 'Custom',
+      activeClass: 'bg-amber-500 border-amber-400 text-white shadow-md shadow-amber-500/30',
+      idleClass: 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20',
+    },
+  ];
 
   return (
     <div id="admin-sales-view" className="flex-1 p-6 bg-slate-950 text-slate-100 overflow-y-auto">
@@ -433,7 +520,7 @@ export const AdminSales: React.FC = () => {
         </div>
       </div>
 
-      {/* Pending Edit Requests Section - Only for admins or users with canEditSales */}
+      {/* Pending Edit Requests */}
       {canEditSale && (
         <div className="mb-5 p-4 bg-amber-500/10 border border-amber-500/30 rounded-xl">
           <div className="flex items-center justify-between mb-3">
@@ -569,26 +656,59 @@ export const AdminSales: React.FC = () => {
           </select>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800/80">
-          <div className="flex items-center gap-2">
+        {/* Period Preset Pills + Custom date range */}
+        <div className="pt-3 border-t border-slate-800/80">
+          <div className="flex items-center gap-2 mb-2">
             <Calendar className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-slate-400">Tarehe:</span>
-            <input
-              type="date"
-              value={startDate}
-              onChange={e => setStartDate(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white"
-            />
-            <span className="text-slate-500">mpaka</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={e => setEndDate(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white"
-            />
+            <span className="text-slate-400 text-[11px] font-semibold uppercase tracking-wider">
+              Period
+            </span>
           </div>
 
-          {(searchQuery || sellerFilter !== 'ALL' || paymentFilter !== 'ALL' || statusFilter !== 'ALL' || shopFilter !== 'ALL' || startDate || endDate) && (
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Colored Preset Pills */}
+            <div className="flex items-center gap-1.5">
+              {presets.map(p => {
+                const isActive = datePreset === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setDatePreset(p.id)}
+                    className={`px-4 py-2 rounded-lg border text-xs font-semibold transition active:scale-95 ${
+                      isActive ? p.activeClass : p.idleClass
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Custom date inputs — inline on PC, only when Custom selected */}
+            {datePreset === 'CUSTOM' && (
+              <div className="flex items-center gap-2 pl-3 border-l border-slate-800 animate-in fade-in duration-150">
+                <label className="text-[10px] text-slate-500 uppercase tracking-wider">From</label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={e => setStartDate(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
+                <label className="text-[10px] text-slate-500 uppercase tracking-wider">To</label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={e => setEndDate(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {hasActiveFilters && (
+          <div className="pt-2 border-t border-slate-800/80 flex justify-end">
             <button
               onClick={() => {
                 setSearchQuery('');
@@ -596,15 +716,15 @@ export const AdminSales: React.FC = () => {
                 setPaymentFilter('ALL');
                 setStatusFilter('ALL');
                 setShopFilter('ALL');
-                setStartDate('');
-                setEndDate('');
+                setDatePreset('TODAY');
+                // startDate / endDate auto-updated by useEffect
               }}
-              className="px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition"
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition"
             >
               Futa Vichujio
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {/* Sales Table */}
@@ -771,9 +891,9 @@ export const AdminSales: React.FC = () => {
                           onChange={e => {
                             const val = e.target.value;
                             const newItems = [...editItems];
-                            newItems[idx] = { 
-                              ...newItems[idx], 
-                              quantity: val === '' ? '' as any : parseInt(val) || 0 
+                            newItems[idx] = {
+                              ...newItems[idx],
+                              quantity: val === '' ? ('' as any) : parseInt(val) || 0,
                             };
                             setEditItems(newItems);
                           }}
@@ -790,9 +910,9 @@ export const AdminSales: React.FC = () => {
                           onChange={e => {
                             const val = e.target.value;
                             const newItems = [...editItems];
-                            newItems[idx] = { 
-                              ...newItems[idx], 
-                              unitPrice: val === '' ? '' as any : parseFloat(val) || 0 
+                            newItems[idx] = {
+                              ...newItems[idx],
+                              unitPrice: val === '' ? ('' as any) : parseFloat(val) || 0,
                             };
                             setEditItems(newItems);
                           }}
@@ -809,9 +929,9 @@ export const AdminSales: React.FC = () => {
                           onChange={e => {
                             const val = e.target.value;
                             const newItems = [...editItems];
-                            newItems[idx] = { 
-                              ...newItems[idx], 
-                              discount: val === '' ? '' as any : parseFloat(val) || 0 
+                            newItems[idx] = {
+                              ...newItems[idx],
+                              discount: val === '' ? ('' as any) : parseFloat(val) || 0,
                             };
                             setEditItems(newItems);
                           }}
