@@ -14,6 +14,7 @@ import {
   Store,
   ChevronDown,
   ChevronRight,
+  Loader2,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { InventoryService } from '../../services/inventoryService';
@@ -21,6 +22,8 @@ import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import { Product } from '../../types';
 import { ProductThumbnail } from '../common/ProductThumbnail';
 import { ProductImageViewerModal } from '../common/ProductImageViewerModal';
+
+const PAGE_SIZE = 10;
 
 export const AdminInventory: React.FC = () => {
   const { currentUser, dbState, addToast, selectedShopId } = useApp();
@@ -32,6 +35,10 @@ export const AdminInventory: React.FC = () => {
 
   // Collapse state per shop
   const [collapsedShops, setCollapsedShops] = useState<Set<string>>(new Set());
+
+  // Pagination state per shop
+  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
+  const [loadingShops, setLoadingShops] = useState<Set<string>>(new Set());
 
   // Low stock filter toggle
   const [showLowStockOnly, setShowLowStockOnly] = useState(false);
@@ -102,18 +109,47 @@ export const AdminInventory: React.FC = () => {
     });
   };
 
+  // ==============================
+  // PAGINATION HELPERS
+  // ==============================
+  const getVisibleCount = (shopId: string): number => {
+    return visibleCounts[shopId] ?? PAGE_SIZE;
+  };
+
+  const handleSeeMore = (shopId: string) => {
+    setLoadingShops(prev => new Set(prev).add(shopId));
+    setTimeout(() => {
+      setVisibleCounts(prev => ({
+        ...prev,
+        [shopId]: (prev[shopId] ?? PAGE_SIZE) + PAGE_SIZE,
+      }));
+      setLoadingShops(prev => {
+        const next = new Set(prev);
+        next.delete(shopId);
+        return next;
+      });
+    }, 300);
+  };
+
+  const handleSeeLess = (shopId: string) => {
+    setVisibleCounts(prev => ({
+      ...prev,
+      [shopId]: PAGE_SIZE,
+    }));
+  };
+
   const selectedProduct = dbState.products.find(p => p.id === selectedProductId);
   const inputQty = parseInt(quantityInput, 10) || 0;
   const calculatedLossValue = selectedProduct ? (inputQty * (selectedProduct.purchasePrice || 0)) : 0;
 
-  const lossMovements = (dbState.movements || []).filter(m => 
+  const lossMovements = (dbState.movements || []).filter(m =>
     ['DAMAGED', 'BROKEN', 'EXPIRED', 'LOST'].includes(m.type)
   );
 
   const filteredLosses = lossMovements.filter(m => {
     const date = new Date(m.createdAt);
     const now = new Date();
-    
+
     if (lossPeriod === 'today') {
       if (date.toDateString() !== now.toDateString()) return false;
     } else if (lossPeriod === 'week') {
@@ -122,7 +158,7 @@ export const AdminInventory: React.FC = () => {
     } else if (lossPeriod === 'month') {
       if (date.getMonth() !== now.getMonth() || date.getFullYear() !== now.getFullYear()) return false;
     }
-    
+
     if (lossTypeFilter !== 'ALL' && m.type !== lossTypeFilter) return false;
     return true;
   });
@@ -151,7 +187,7 @@ export const AdminInventory: React.FC = () => {
     else if (adjustmentType === 'OUT') delta = -qty;
     else if (adjustmentType === 'SET') delta = qty - targetProduct.currentStock;
 
-    const finalReason = reasonInput.trim() 
+    const finalReason = reasonInput.trim()
       ? `[${adjustmentCategory}] ${reasonInput.trim()}`
       : `[${adjustmentCategory}] Stock adjustment`;
 
@@ -192,7 +228,6 @@ export const AdminInventory: React.FC = () => {
       return;
     }
 
-    // Group low stock by shop
     const lowStockByShop = shops
       .map(shop => ({
         shop,
@@ -377,7 +412,7 @@ export const AdminInventory: React.FC = () => {
     });
   };
 
-  // Print Loss Report (unchanged)
+  // Print Loss Report
   const handlePrintLossReport = () => {
     const printWindow = window.open('', '_blank', 'width=1200,height=800');
     if (!printWindow) return;
@@ -465,7 +500,7 @@ export const AdminInventory: React.FC = () => {
   };
 
   // ==============================
-  // SHARED: RENDER PRODUCT TABLE ROW (desktop)
+  // SHARED: RENDER PRODUCT TABLE ROW
   // ==============================
   const renderStockRow = (p: Product) => {
     const isLow = p.currentStock <= p.minStock;
@@ -517,7 +552,6 @@ export const AdminInventory: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Low Stock Report Button */}
           <button
             onClick={handlePrintLowStockReport}
             className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs shadow-lg transition"
@@ -687,6 +721,13 @@ export const AdminInventory: React.FC = () => {
                   0
                 );
 
+                // Pagination
+                const visibleCount = getVisibleCount(shop.id);
+                const visibleProducts = shopProducts.slice(0, visibleCount);
+                const hasMore = shopProducts.length > visibleCount;
+                const remaining = shopProducts.length - visibleCount;
+                const isLoading = loadingShops.has(shop.id);
+
                 return (
                   <div
                     key={shop.id}
@@ -739,24 +780,74 @@ export const AdminInventory: React.FC = () => {
 
                     {/* Stock Table */}
                     {!isCollapsed && (
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs">
-                          <thead>
-                            <tr className="border-b border-slate-800 bg-slate-950/60 text-slate-400">
-                              <th className="py-3 px-4 font-semibold">SKU</th>
-                              <th className="py-3 px-4 font-semibold">Product Name</th>
-                              <th className="py-3 px-4 text-center font-semibold">Current Stock</th>
-                              <th className="py-3 px-4 text-center font-semibold">Min Threshold</th>
-                              <th className="py-3 px-4 text-right font-semibold">Cost / Unit</th>
-                              <th className="py-3 px-4 text-right font-semibold">Total Cost Value</th>
-                              <th className="py-3 px-4 text-right font-semibold">Retail Value</th>
-                              <th className="py-3 px-4 text-right font-semibold">Action</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800/60">
-                            {shopProducts.map(renderStockRow)}
-                          </tbody>
-                        </table>
+                      <div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead>
+                              <tr className="border-b border-slate-800 bg-slate-950/60 text-slate-400">
+                                <th className="py-3 px-4 font-semibold">SKU</th>
+                                <th className="py-3 px-4 font-semibold">Product Name</th>
+                                <th className="py-3 px-4 text-center font-semibold">Current Stock</th>
+                                <th className="py-3 px-4 text-center font-semibold">Min Threshold</th>
+                                <th className="py-3 px-4 text-right font-semibold">Cost / Unit</th>
+                                <th className="py-3 px-4 text-right font-semibold">Total Cost Value</th>
+                                <th className="py-3 px-4 text-right font-semibold">Retail Value</th>
+                                <th className="py-3 px-4 text-right font-semibold">Action</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-800/60">
+                              {visibleProducts.map(renderStockRow)}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Pagination Footer */}
+                        {shopProducts.length > PAGE_SIZE && (
+                          <div className="px-5 py-3 border-t border-slate-800/60 bg-slate-950/30 flex items-center justify-between gap-3">
+                            <div className="text-[11px] text-slate-500">
+                              Showing{' '}
+                              <span className="text-slate-300 font-semibold">
+                                {Math.min(visibleCount, shopProducts.length)}
+                              </span>{' '}
+                              of{' '}
+                              <span className="text-slate-300 font-semibold">
+                                {shopProducts.length}
+                              </span>{' '}
+                              products
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {visibleCount > PAGE_SIZE && (
+                                <button
+                                  onClick={() => handleSeeLess(shop.id)}
+                                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+                                >
+                                  Show Less
+                                </button>
+                              )}
+                              {hasMore && (
+                                <button
+                                  onClick={() => handleSeeMore(shop.id)}
+                                  disabled={isLoading}
+                                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-xs font-semibold shadow transition disabled:opacity-60 disabled:cursor-wait"
+                                >
+                                  {isLoading ? (
+                                    <>
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      <span>Loading...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ChevronDown className="w-3.5 h-3.5" />
+                                      <span>
+                                        See More ({Math.min(PAGE_SIZE, remaining)} of {remaining})
+                                      </span>
+                                    </>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
