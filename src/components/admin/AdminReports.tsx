@@ -10,6 +10,7 @@ import {
   Search,
   TrendingDown,
   TrendingUp,
+  AlertTriangle,
   ChevronDown,
   ChevronRight,
 } from 'lucide-react';
@@ -33,16 +34,19 @@ interface DeviationRow {
   productId: string;
   productName: string;
   sku: string;
-  referencePrice: number;
+  referencePrice: number;   // 0 means no reference known
   soldPrice: number;
+  purchasePrice: number;    // cost snapshot at sale time
   quantity: number;
-  diff: number;
-  totalImpact: number;
+  diff: number;             // soldPrice - referencePrice
+  totalImpact: number;      // diff * qty
   direction: 'ABOVE' | 'BELOW';
   usedSnapshot: boolean;
+  belowCost: boolean;       // soldPrice < purchasePrice
+  costLoss: number;         // (purchasePrice - soldPrice) * qty when belowCost
 }
 
-type DeviationDirection = 'ALL' | 'ABOVE' | 'BELOW';
+type DeviationDirection = 'ALL' | 'ABOVE' | 'BELOW' | 'BELOW_COST';
 
 // ─────────────────────────────────────────────────────────────
 // Helpers
@@ -175,32 +179,39 @@ const SectionHeader: React.FC<{
 export const AdminReports: React.FC = () => {
   const { currentUser, dbState, addToast } = useApp();
 
+  // Income statement period
   const [reportPeriod, setReportPeriod] = useState<ReportPeriod>('today');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
 
+  // Deviation period
   const [deviationPeriod, setDeviationPeriod] = useState<ReportPeriod>('today');
   const [deviationStart, setDeviationStart] = useState('');
   const [deviationEnd, setDeviationEnd] = useState('');
 
+  // Shop period
   const [shopPeriod, setShopPeriod] = useState<ReportPeriod>('today');
   const [shopStart, setShopStart] = useState('');
   const [shopEnd, setShopEnd] = useState('');
 
+  // Product period
   const [productPeriod, setProductPeriod] = useState<ReportPeriod>('today');
   const [productStart, setProductStart] = useState('');
   const [productEnd, setProductEnd] = useState('');
 
+  // Seller period
   const [sellerPeriod, setSellerPeriod] = useState<ReportPeriod>('today');
   const [sellerStart, setSellerStart] = useState('');
   const [sellerEnd, setSellerEnd] = useState('');
 
+  // Collapse state
   const [incomeCollapsed, setIncomeCollapsed] = useState(false);
   const [deviationCollapsed, setDeviationCollapsed] = useState(false);
   const [shopsCollapsed, setShopsCollapsed] = useState(false);
   const [productsCollapsed, setProductsCollapsed] = useState(false);
   const [sellersCollapsed, setSellersCollapsed] = useState(false);
 
+  // Filters
   const [shopFilter, setShopFilter] = useState('ALL');
   const [productSearch, setProductSearch] = useState('');
   const [sellerSearch, setSellerSearch] = useState('');
@@ -214,12 +225,14 @@ export const AdminReports: React.FC = () => {
   const shops = dbState.shops || [];
   const products = dbState.products || [];
 
+  // Ranges per section
   const incomeRange = useMemo(() => computeRange(reportPeriod, customStartDate, customEndDate), [reportPeriod, customStartDate, customEndDate]);
   const deviationRange = useMemo(() => computeRange(deviationPeriod, deviationStart, deviationEnd), [deviationPeriod, deviationStart, deviationEnd]);
   const shopRange = useMemo(() => computeRange(shopPeriod, shopStart, shopEnd), [shopPeriod, shopStart, shopEnd]);
   const productRange = useMemo(() => computeRange(productPeriod, productStart, productEnd), [productPeriod, productStart, productEnd]);
   const sellerRange = useMemo(() => computeRange(sellerPeriod, sellerStart, sellerEnd), [sellerPeriod, sellerStart, sellerEnd]);
 
+  // Summaries
   const incomeSummary = useMemo(() => ReportService.getFinancialSummary(incomeRange, { shopId: shopFilter }, currentUser) || {}, [incomeRange, currentUser, dbState, shopFilter]);
   const shopSummary = useMemo(() => ReportService.getFinancialSummary(shopRange, { shopId: shopFilter }, currentUser) || {}, [shopRange, currentUser, dbState, shopFilter]);
   const productSummary = useMemo(() => ReportService.getFinancialSummary(productRange, { shopId: shopFilter }, currentUser) || {}, [productRange, currentUser, dbState, shopFilter]);
@@ -227,24 +240,24 @@ export const AdminReports: React.FC = () => {
   const deviationSummary = useMemo(() => ReportService.getFinancialSummary(deviationRange, { shopId: shopFilter }, currentUser) || {}, [deviationRange, currentUser, dbState, shopFilter]);
 
   const filteredProducts = useMemo(() => {
-    const list = productSummary.topProducts || [];
+    const list = (productSummary as any).topProducts || [];
     if (!productSearch.trim()) return list;
     const q = productSearch.trim().toLowerCase();
     return list.filter((p: any) => p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q));
-  }, [productSummary.topProducts, productSearch]);
+  }, [productSummary, productSearch]);
 
   const filteredSellers = useMemo(() => {
-    const list = sellerSummary.sellerSales || [];
+    const list = (sellerSummary as any).sellerSales || [];
     if (!sellerSearch.trim()) return list;
     const q = sellerSearch.trim().toLowerCase();
     return list.filter((s: any) => s.name.toLowerCase().includes(q));
-  }, [sellerSummary.sellerSales, sellerSearch]);
+  }, [sellerSummary, sellerSearch]);
 
   const selectedShopName =
     shopFilter === 'ALL' ? 'All Shops' : shops.find((s: any) => s.id === shopFilter)?.name || 'Unknown';
 
   // ─────────────────────────────────────────────────────────────
-  // Deviations — prefers snapshot, falls back to current product price
+  // Deviations — snapshot-first, below-cost detection, never skip
   // ─────────────────────────────────────────────────────────────
   const allDeviations = useMemo<DeviationRow[]>(() => {
     const sales = (deviationSummary as any).filteredSales || [];
@@ -256,27 +269,43 @@ export const AdminReports: React.FC = () => {
 
       for (const item of sale.items || []) {
         const product: any = productMap.get(item.productId);
-        if (!product) continue;
 
+        // Reference resolution — snapshot preferred, current price fallback
         const hasSnapshot =
           item.referencePrice !== undefined &&
           item.referencePrice !== null &&
           item.referencePrice > 0;
 
-        const referencePrice = hasSnapshot
-          ? (item.referencePrice as number)
-          : (product.proposedSellingPrice && product.proposedSellingPrice > 0
-              ? product.proposedSellingPrice
-              : product.sellingPrice || 0);
+        let referencePrice = 0;
+        let usedSnapshot = false;
 
-        if (referencePrice <= 0) continue;
+        if (hasSnapshot) {
+          referencePrice = item.referencePrice as number;
+          usedSnapshot = true;
+        } else if (product) {
+          referencePrice =
+            product.proposedSellingPrice && product.proposedSellingPrice > 0
+              ? product.proposedSellingPrice
+              : product.sellingPrice || 0;
+          usedSnapshot = false;
+        }
 
         const soldPrice = item.unitPrice || 0;
+        const purchasePrice = item.purchasePrice || 0;
         const qty = item.quantity || 0;
-        if (soldPrice === referencePrice) continue;
 
-        const diff = Number((soldPrice - referencePrice).toFixed(2));
-        const totalImpact = Number((diff * qty).toFixed(2));
+        // Below-cost detection (works with or without a reference)
+        const belowCost = purchasePrice > 0 && soldPrice < purchasePrice;
+        const costLoss = belowCost
+          ? Number(((purchasePrice - soldPrice) * qty).toFixed(2))
+          : 0;
+
+        // Skip only if we truly can't classify the row
+        if (referencePrice <= 0 && !belowCost) continue;
+        if (referencePrice > 0 && soldPrice === referencePrice && !belowCost) continue;
+
+        const diff = referencePrice > 0 ? Number((soldPrice - referencePrice).toFixed(2)) : 0;
+        const totalImpact = referencePrice > 0 ? Number((diff * qty).toFixed(2)) : 0;
 
         rows.push({
           saleId: sale.id,
@@ -288,14 +317,17 @@ export const AdminReports: React.FC = () => {
           sellerName: sale.sellerName,
           productId: item.productId,
           productName: item.productName,
-          sku: item.sku || product.sku || '',
+          sku: item.sku || product?.sku || '',
           referencePrice,
           soldPrice,
+          purchasePrice,
           quantity: qty,
           diff,
           totalImpact,
           direction: diff > 0 ? 'ABOVE' : 'BELOW',
-          usedSnapshot: hasSnapshot,
+          usedSnapshot,
+          belowCost,
+          costLoss,
         });
       }
     }
@@ -306,31 +338,39 @@ export const AdminReports: React.FC = () => {
 
   const deviations = useMemo(() => {
     if (deviationDirection === 'ALL') return allDeviations;
-    return allDeviations.filter(d => d.direction === deviationDirection);
+    if (deviationDirection === 'BELOW_COST') return allDeviations.filter(d => d.belowCost);
+    if (deviationDirection === 'BELOW') return allDeviations.filter(d => d.direction === 'BELOW' && d.referencePrice > 0);
+    return allDeviations.filter(d => d.direction === 'ABOVE' && d.referencePrice > 0);
   }, [allDeviations, deviationDirection]);
 
   const deviationStats = useMemo(() => {
-    const belowRows = allDeviations.filter(d => d.direction === 'BELOW');
-    const aboveRows = allDeviations.filter(d => d.direction === 'ABOVE');
-    const belowImpact = belowRows.reduce((s, r) => s + r.totalImpact, 0);
-    const aboveImpact = aboveRows.reduce((s, r) => s + r.totalImpact, 0);
+    const belowRefRows = allDeviations.filter(d => d.direction === 'BELOW' && d.referencePrice > 0);
+    const aboveRefRows = allDeviations.filter(d => d.direction === 'ABOVE' && d.referencePrice > 0);
+    const belowCostRows = allDeviations.filter(d => d.belowCost);
+
+    const belowImpact = belowRefRows.reduce((s, r) => s + r.totalImpact, 0);
+    const aboveImpact = aboveRefRows.reduce((s, r) => s + r.totalImpact, 0);
+    const costLoss = belowCostRows.reduce((s, r) => s + r.costLoss, 0);
+
     return {
-      belowCount: belowRows.length,
-      aboveCount: aboveRows.length,
-      belowSalesCount: new Set(belowRows.map(r => r.saleId)).size,
-      aboveSalesCount: new Set(aboveRows.map(r => r.saleId)).size,
+      belowCount: belowRefRows.length,
+      aboveCount: aboveRefRows.length,
+      belowCostCount: belowCostRows.length,
+      belowSalesCount: new Set(belowRefRows.map(r => r.saleId)).size,
+      aboveSalesCount: new Set(aboveRefRows.map(r => r.saleId)).size,
       belowImpact: Number(belowImpact.toFixed(2)),
       aboveImpact: Number(aboveImpact.toFixed(2)),
+      costLoss: Number(costLoss.toFixed(2)),
       netImpact: Number((belowImpact + aboveImpact).toFixed(2)),
     };
   }, [allDeviations]);
 
-  const DEVIATION_DISPLAY_CAP = 100;
+  const DEVIATION_DISPLAY_CAP = 150;
   const visibleDeviations = deviations.slice(0, DEVIATION_DISPLAY_CAP);
   const hiddenDeviationCount = Math.max(0, deviations.length - DEVIATION_DISPLAY_CAP);
 
   // ─────────────────────────────────────────────────────────────
-  // Print reports (share the same documents as PC)
+  // Print Main Report
   // ─────────────────────────────────────────────────────────────
   const handlePrintReport = () => {
     setIsPrinting(true);
@@ -342,8 +382,7 @@ export const AdminReports: React.FC = () => {
     }
     const s: any = incomeSummary;
     const printContent = `
-      <!DOCTYPE html>
-      <html><head><title>Financial Report - ${selectedShopName}</title>
+      <!DOCTYPE html><html><head><title>Financial Report - ${selectedShopName}</title>
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
       <style>
         * { margin:0; padding:0; box-sizing:border-box; }
@@ -425,9 +464,8 @@ export const AdminReports: React.FC = () => {
         .summary { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-bottom:20px; }
         .card { padding:12px; border-radius:8px; text-align:center; }
         .card.below { background:#fef2f2; border:2px solid #dc2626; }
+        .card.belowcost { background:#fff7ed; border:2px solid #f97316; }
         .card.above { background:#f0fdf4; border:2px solid #16a34a; }
-        .card.gained { background:#eff6ff; border:2px solid #3b82f6; }
-        .card.discount { background:#fff7ed; border:2px solid #f97316; }
         .card .label { font-size:9px; text-transform:uppercase; color:#64748b; font-weight:600; }
         .card .value { font-size:16px; font-weight:bold; margin-top:4px; }
         table { width:100%; border-collapse:collapse; font-size:10px; }
@@ -435,12 +473,14 @@ export const AdminReports: React.FC = () => {
         th { padding:7px 5px; text-align:left; font-weight:600; }
         td { padding:6px 5px; border-bottom:1px solid #e2e8f0; }
         tr.below td { background:#fef2f2; }
+        tr.belowcost td { background:#fff7ed; }
         tr.above td { background:#f0fdf4; }
         .amount { text-align:right; font-family:'Courier New',monospace; font-weight:bold; }
         .diff-below { color:#dc2626; text-align:right; font-weight:bold; }
         .diff-above { color:#16a34a; text-align:right; font-weight:bold; }
+        .loss-tag { display:inline-block; background:#f97316; color:#fff; padding:1px 4px; border-radius:3px; font-size:8px; font-weight:bold; margin-left:3px; }
         .est { color:#94a3b8; font-size:8px; font-weight:normal; margin-left:3px; }
-        @media (min-width:640px) { .summary { grid-template-columns:repeat(4,1fr); } table { font-size:11px; } }
+        @media (min-width:640px) { .summary { grid-template-columns:repeat(3,1fr); } table { font-size:11px; } }
       </style></head><body>
         <div class="header">
           <h1>Price Deviation Audit</h1>
@@ -450,28 +490,27 @@ export const AdminReports: React.FC = () => {
           </div>
         </div>
         <div class="summary">
-          <div class="card below"><div class="label">Below Ref.</div><div class="value">${deviationStats.belowCount}</div></div>
-          <div class="card above"><div class="label">Above Ref.</div><div class="value">${deviationStats.aboveCount}</div></div>
-          <div class="card gained"><div class="label">Extra Gained</div><div class="value">+${settings.currencySymbol} ${deviationStats.aboveImpact.toLocaleString()}</div></div>
-          <div class="card discount"><div class="label">Discount Value</div><div class="value">${settings.currencySymbol} ${deviationStats.belowImpact.toLocaleString()}</div></div>
+          <div class="card below"><div class="label">Below Reference</div><div class="value">${deviationStats.belowCount}</div></div>
+          <div class="card belowcost"><div class="label">Below Cost (Loss)</div><div class="value">${deviationStats.belowCostCount}</div></div>
+          <div class="card above"><div class="label">Above Reference</div><div class="value">${deviationStats.aboveCount}</div></div>
         </div>
         <table><thead><tr>
           <th>Date</th><th>Receipt</th><th>Shop</th><th>Seller</th><th>Product</th><th>SKU</th>
-          <th class="amount">Ref</th><th class="amount">Sold</th><th class="amount">Diff</th><th class="amount">Qty</th><th class="amount">Impact</th>
+          <th class="amount">Reference</th><th class="amount">Sold</th><th class="amount">Diff</th><th class="amount">Qty</th><th class="amount">Impact</th>
         </tr></thead><tbody>
           ${deviations.map(d => `
-            <tr class="${d.direction === 'BELOW' ? 'below' : 'above'}">
+            <tr class="${d.belowCost ? 'belowcost' : d.direction === 'BELOW' ? 'below' : 'above'}">
               <td>${formatDateTime(d.createdAt)}</td>
               <td><strong>${d.receiptNumber}</strong></td>
               <td>${d.shopName}</td>
               <td>${d.sellerName}</td>
-              <td>${d.productName}</td>
+              <td>${d.productName}${d.belowCost ? '<span class="loss-tag">LOSS</span>' : ''}</td>
               <td style="font-family:monospace;">${d.sku}</td>
-              <td class="amount">${settings.currencySymbol} ${d.referencePrice.toLocaleString()}${!d.usedSnapshot ? '<span class="est">est.</span>' : ''}</td>
+              <td class="amount">${d.referencePrice > 0 ? `${settings.currencySymbol} ${d.referencePrice.toLocaleString()}${!d.usedSnapshot ? '<span class="est">est.</span>' : ''}` : '—'}</td>
               <td class="amount">${settings.currencySymbol} ${d.soldPrice.toLocaleString()}</td>
-              <td class="${d.direction === 'BELOW' ? 'diff-below' : 'diff-above'}">${d.diff > 0 ? '+' : ''}${settings.currencySymbol} ${d.diff.toLocaleString()}</td>
+              <td class="${d.direction === 'BELOW' ? 'diff-below' : 'diff-above'}">${d.referencePrice > 0 ? `${d.diff > 0 ? '+' : ''}${settings.currencySymbol} ${d.diff.toLocaleString()}` : '—'}</td>
               <td class="amount">${d.quantity}</td>
-              <td class="${d.direction === 'BELOW' ? 'diff-below' : 'diff-above'}">${d.totalImpact > 0 ? '+' : ''}${settings.currencySymbol} ${d.totalImpact.toLocaleString()}</td>
+              <td class="${d.direction === 'BELOW' ? 'diff-below' : 'diff-above'}">${d.referencePrice > 0 ? `${d.totalImpact > 0 ? '+' : ''}${settings.currencySymbol} ${d.totalImpact.toLocaleString()}` : '—'}</td>
             </tr>
           `).join('')}
         </tbody></table>
@@ -524,13 +563,14 @@ export const AdminReports: React.FC = () => {
     csv += `Period: ${deviationRange.from || 'Beginning'} to ${deviationRange.to || 'Present'}\n`;
     csv += `Direction: ${deviationDirection}\n\n`;
     csv += `Items Below Reference,${deviationStats.belowCount}\n`;
+    csv += `Items Below Cost (Loss),${deviationStats.belowCostCount}\n`;
     csv += `Items Above Reference,${deviationStats.aboveCount}\n`;
-    csv += `Extra Gained,${deviationStats.aboveImpact}\n`;
-    csv += `Discount Value,${deviationStats.belowImpact}\n`;
-    csv += `Net Impact,${deviationStats.netImpact}\n\n`;
-    csv += `Date,Receipt #,Shop,Seller,Product,SKU,Reference,Sold At,Diff,Qty,Impact,Direction,Reference Source\n`;
+    csv += `Below Reference Value,${deviationStats.belowImpact}\n`;
+    csv += `Total Cost Loss,${deviationStats.costLoss}\n`;
+    csv += `Above Reference Value,${deviationStats.aboveImpact}\n\n`;
+    csv += `Date,Receipt #,Shop,Seller,Product,SKU,Reference,Sold At,Purchase Cost,Diff,Qty,Impact,Direction,Below Cost,Reference Source\n`;
     deviations.forEach(d => {
-      csv += `"${formatDateTime(d.createdAt)}","${d.receiptNumber}","${d.shopName}","${d.sellerName}","${d.productName}","${d.sku}",${d.referencePrice},${d.soldPrice},${d.diff},${d.quantity},${d.totalImpact},${d.direction},"${d.usedSnapshot ? 'Sale-time snapshot' : 'Current product price (legacy)'}"\n`;
+      csv += `"${formatDateTime(d.createdAt)}","${d.receiptNumber}","${d.shopName}","${d.sellerName}","${d.productName}","${d.sku}",${d.referencePrice},${d.soldPrice},${d.purchasePrice},${d.diff},${d.quantity},${d.totalImpact},${d.direction},${d.belowCost ? 'YES' : 'NO'},"${d.usedSnapshot ? 'Snapshot' : 'Current price'}"\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -544,14 +584,14 @@ export const AdminReports: React.FC = () => {
   };
 
   // ─────────────────────────────────────────────────────────────
-  // Render — mobile-optimized with cards for narrow screens
+  // Render
   // ─────────────────────────────────────────────────────────────
   return (
     <div
       id="admin-reports-view"
       className="flex-1 p-3.5 sm:p-6 bg-slate-950 text-slate-100 overflow-y-auto space-y-4 pb-24 sm:pb-6"
     >
-      {/* Global Header */}
+      {/* Global header */}
       <div className="flex flex-col gap-3 pb-4 border-b border-slate-800">
         <div>
           <h2 className="text-lg sm:text-xl font-bold text-white tracking-tight">Financial Reports</h2>
@@ -588,7 +628,7 @@ export const AdminReports: React.FC = () => {
         </div>
       </div>
 
-      {/* ── INCOME STATEMENT ────────────────────────────────── */}
+      {/* ── Income Statement ──────────────────────────────── */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
         <SectionHeader
           title="Income Statement"
@@ -656,11 +696,11 @@ export const AdminReports: React.FC = () => {
         )}
       </div>
 
-      {/* ── PRICE DEVIATION AUDIT ───────────────────────────── */}
+      {/* ── Price Deviation Audit ────────────────────────── */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
         <SectionHeader
           title="Price Deviation Audit"
-          subtitle="Sales charged above or below reference"
+          subtitle="Sales charged above, below, or at a loss"
           icon={<TrendingDown className="w-4 h-4 text-rose-400" />}
           period={deviationPeriod}
           onPeriodChange={setDeviationPeriod}
@@ -703,50 +743,39 @@ export const AdminReports: React.FC = () => {
               </div>
             ) : (
               <div className="p-3.5 space-y-3.5">
-                {/* Summary cards — 2x2 on mobile */}
-                <div className="grid grid-cols-2 gap-2.5">
+                {/* Summary — 3 cards */}
+                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
                   <div className="p-3 rounded-xl bg-rose-950/30 border border-rose-800/40">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] font-semibold text-rose-300 uppercase tracking-wider">Below</span>
+                      <span className="text-[10px] font-semibold text-rose-300 uppercase tracking-wider">Below Reference</span>
                       <TrendingDown className="w-3.5 h-3.5 text-rose-400" />
                     </div>
                     <div className="text-lg font-bold text-rose-300 font-mono">{deviationStats.belowCount}</div>
                     <div className="text-[10px] text-rose-400/80 mt-0.5">
-                      {deviationStats.belowSalesCount} sale{deviationStats.belowSalesCount === 1 ? '' : 's'}
-                    </div>
-                  </div>
-
-                  <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-800/40">
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] font-semibold text-emerald-300 uppercase tracking-wider">Above</span>
-                      <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
-                    </div>
-                    <div className="text-lg font-bold text-emerald-300 font-mono">{deviationStats.aboveCount}</div>
-                    <div className="text-[10px] text-emerald-400/80 mt-0.5">
-                      {deviationStats.aboveSalesCount} sale{deviationStats.aboveSalesCount === 1 ? '' : 's'}
+                      {deviationStats.belowSalesCount} sale{deviationStats.belowSalesCount === 1 ? '' : 's'} · value {formatCurrency(deviationStats.belowImpact, settings.currencySymbol)}
                     </div>
                   </div>
 
                   <div className="p-3 rounded-xl bg-orange-950/30 border border-orange-800/40">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] font-semibold text-orange-300 uppercase tracking-wider">Discount</span>
-                      <TrendingDown className="w-3.5 h-3.5 text-orange-400" />
+                      <span className="text-[10px] font-semibold text-orange-300 uppercase tracking-wider">Below Cost (Loss)</span>
+                      <AlertTriangle className="w-3.5 h-3.5 text-orange-400" />
                     </div>
-                    <div className="text-base font-bold text-orange-300 font-mono truncate">
-                      {formatCurrency(deviationStats.belowImpact, settings.currencySymbol)}
+                    <div className="text-lg font-bold text-orange-300 font-mono">{deviationStats.belowCostCount}</div>
+                    <div className="text-[10px] text-orange-400/80 mt-0.5">
+                      Real loss: {formatCurrency(deviationStats.costLoss, settings.currencySymbol)}
                     </div>
-                    <div className="text-[10px] text-orange-400/80 mt-0.5">Below reference value</div>
                   </div>
 
-                  <div className="p-3 rounded-xl bg-blue-950/30 border border-blue-800/40">
+                  <div className="p-3 rounded-xl bg-emerald-950/30 border border-emerald-800/40">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] font-semibold text-blue-300 uppercase tracking-wider">Extra</span>
-                      <TrendingUp className="w-3.5 h-3.5 text-blue-400" />
+                      <span className="text-[10px] font-semibold text-emerald-300 uppercase tracking-wider">Above Reference</span>
+                      <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
                     </div>
-                    <div className="text-base font-bold text-blue-300 font-mono truncate">
-                      +{formatCurrency(deviationStats.aboveImpact, settings.currencySymbol)}
+                    <div className="text-lg font-bold text-emerald-300 font-mono">{deviationStats.aboveCount}</div>
+                    <div className="text-[10px] text-emerald-400/80 mt-0.5">
+                      {deviationStats.aboveSalesCount} sale{deviationStats.aboveSalesCount === 1 ? '' : 's'} · value {formatCurrency(deviationStats.aboveImpact, settings.currencySymbol)}
                     </div>
-                    <div className="text-[10px] text-blue-400/80 mt-0.5">Above reference value</div>
                   </div>
                 </div>
 
@@ -762,10 +791,10 @@ export const AdminReports: React.FC = () => {
                 </div>
 
                 {/* Direction filter pills */}
-                <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-[11px] font-semibold">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-[10px] font-semibold">
                   <button
                     onClick={() => setDeviationDirection('ALL')}
-                    className={`flex-1 px-3 py-1.5 rounded-md transition ${
+                    className={`px-2 py-1.5 rounded-md transition ${
                       deviationDirection === 'ALL' ? 'bg-slate-800 text-white' : 'text-slate-400'
                     }`}
                   >
@@ -773,15 +802,23 @@ export const AdminReports: React.FC = () => {
                   </button>
                   <button
                     onClick={() => setDeviationDirection('BELOW')}
-                    className={`flex-1 px-3 py-1.5 rounded-md transition ${
+                    className={`px-2 py-1.5 rounded-md transition ${
                       deviationDirection === 'BELOW' ? 'bg-rose-600 text-white' : 'text-slate-400'
                     }`}
                   >
                     Below ({deviationStats.belowCount})
                   </button>
                   <button
+                    onClick={() => setDeviationDirection('BELOW_COST')}
+                    className={`px-2 py-1.5 rounded-md transition ${
+                      deviationDirection === 'BELOW_COST' ? 'bg-orange-600 text-white' : 'text-slate-400'
+                    }`}
+                  >
+                    Loss ({deviationStats.belowCostCount})
+                  </button>
+                  <button
                     onClick={() => setDeviationDirection('ABOVE')}
-                    className={`flex-1 px-3 py-1.5 rounded-md transition ${
+                    className={`px-2 py-1.5 rounded-md transition ${
                       deviationDirection === 'ABOVE' ? 'bg-emerald-600 text-white' : 'text-slate-400'
                     }`}
                   >
@@ -794,47 +831,63 @@ export const AdminReports: React.FC = () => {
                   {hiddenDeviationCount > 0 && ` · export CSV to see all`}
                 </div>
 
-                {/* Mobile-friendly deviation cards */}
+                {/* Mobile-friendly cards */}
                 <div className="space-y-2">
                   {visibleDeviations.map((d, idx) => {
                     const isBelow = d.direction === 'BELOW';
+                    const cardBg = d.belowCost
+                      ? 'bg-orange-950/10 border-orange-800/40'
+                      : isBelow
+                      ? 'bg-rose-950/10 border-rose-800/40'
+                      : 'bg-emerald-950/10 border-emerald-800/40';
+                    const accentText = d.belowCost
+                      ? 'text-orange-300'
+                      : isBelow
+                      ? 'text-rose-300'
+                      : 'text-emerald-300';
+
                     return (
-                      <div
-                        key={`${d.saleId}-${d.productId}-${idx}`}
-                        className={`rounded-xl p-3 border space-y-2 ${
-                          isBelow
-                            ? 'bg-rose-950/10 border-rose-800/40'
-                            : 'bg-emerald-950/10 border-emerald-800/40'
-                        }`}
-                      >
+                      <div key={`${d.saleId}-${d.productId}-${idx}`} className={`rounded-xl p-3 border space-y-2 ${cardBg}`}>
                         <div className="flex items-center justify-between gap-2">
                           <div className="min-w-0 flex-1">
-                            <div className="text-xs font-semibold text-white truncate">{d.productName}</div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-xs font-semibold text-white truncate">{d.productName}</span>
+                              {d.belowCost && (
+                                <span className="text-[9px] px-1.5 py-0.5 rounded bg-orange-500/30 text-orange-200 border border-orange-500/50 font-bold">
+                                  LOSS
+                                </span>
+                              )}
+                            </div>
                             <div className="text-[10px] text-slate-500 font-mono">{d.sku}</div>
                           </div>
-                          <div className={`shrink-0 text-right ${isBelow ? 'text-rose-400' : 'text-emerald-400'}`}>
+                          <div className={`shrink-0 text-right ${accentText}`}>
                             <div className="font-mono font-bold text-sm">
-                              {d.totalImpact > 0 ? '+' : ''}{formatCurrency(d.totalImpact, settings.currencySymbol)}
+                              {d.referencePrice > 0
+                                ? `${d.totalImpact > 0 ? '+' : ''}${formatCurrency(d.totalImpact, settings.currencySymbol)}`
+                                : `-${formatCurrency(d.costLoss, settings.currencySymbol)}`}
                             </div>
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-3 gap-1.5 text-[11px]">
+                        <div className="grid grid-cols-4 gap-1.5 text-[10px]">
                           <div>
                             <div className="text-slate-500 text-[9px]">Reference</div>
                             <div className="font-mono text-slate-300">
-                              {formatCurrency(d.referencePrice, settings.currencySymbol)}
-                              {!d.usedSnapshot && (
-                                <span className="ml-1 text-[9px] text-slate-500" title="Legacy sale — compared against current product price">
-                                  est.
-                                </span>
-                              )}
+                              {d.referencePrice > 0
+                                ? `${formatCurrency(d.referencePrice, settings.currencySymbol)}${!d.usedSnapshot ? '*' : ''}`
+                                : '—'}
                             </div>
                           </div>
                           <div>
-                            <div className="text-slate-500 text-[9px]">Sold At</div>
-                            <div className={`font-mono font-bold ${isBelow ? 'text-rose-300' : 'text-emerald-300'}`}>
+                            <div className="text-slate-500 text-[9px]">Sold</div>
+                            <div className={`font-mono font-bold ${accentText}`}>
                               {formatCurrency(d.soldPrice, settings.currencySymbol)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-slate-500 text-[9px]">Cost</div>
+                            <div className="font-mono text-slate-400">
+                              {d.purchasePrice > 0 ? formatCurrency(d.purchasePrice, settings.currencySymbol) : '—'}
                             </div>
                           </div>
                           <div>
@@ -852,13 +905,17 @@ export const AdminReports: React.FC = () => {
                     );
                   })}
                 </div>
+
+                <div className="text-[9px] text-slate-500 text-center italic">
+                  * = Reference estimated from current product price (legacy sale without snapshot)
+                </div>
               </div>
             )}
           </>
         )}
       </div>
 
-      {/* ── SHOP PERFORMANCE ─────────────────────────────────── */}
+      {/* ── Shop Performance ─────────────────────────────── */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
         <SectionHeader
           title="Shop Performance"
@@ -900,7 +957,7 @@ export const AdminReports: React.FC = () => {
         )}
       </div>
 
-      {/* ── PRODUCT PROFITABILITY ────────────────────────────── */}
+      {/* ── Product Profitability ────────────────────────── */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
         <SectionHeader
           title="Product Profitability"
@@ -954,7 +1011,7 @@ export const AdminReports: React.FC = () => {
         )}
       </div>
 
-      {/* ── SELLER PERFORMANCE ───────────────────────────────── */}
+      {/* ── Seller Performance ───────────────────────────── */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
         <SectionHeader
           title="Seller Performance"
