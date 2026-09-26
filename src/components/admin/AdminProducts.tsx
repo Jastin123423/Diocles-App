@@ -15,6 +15,7 @@ import {
   Trash2,
   ChevronDown,
   ChevronRight,
+  Loader2,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ProductService } from '../../services/productService';
@@ -24,6 +25,8 @@ import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import { ProductThumbnail } from '../common/ProductThumbnail';
 import { ProductImageViewerModal } from '../common/ProductImageViewerModal';
 import { ProductImageUpload } from '../common/ProductImageUpload';
+
+const PAGE_SIZE = 5;
 
 export const AdminProducts: React.FC = () => {
   const { currentUser, dbState, addToast, selectedShopId } = useApp();
@@ -37,6 +40,10 @@ export const AdminProducts: React.FC = () => {
 
   // Collapse state for shop groups (default: all expanded)
   const [collapsedShops, setCollapsedShops] = useState<Set<string>>(new Set());
+
+  // Pagination state per shop: { [shopId]: number of items shown }
+  const [visibleCounts, setVisibleCounts] = useState<Record<string, number>>({});
+  const [loadingShops, setLoadingShops] = useState<Set<string>>(new Set());
 
   // Add / Edit Product Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -71,15 +78,19 @@ export const AdminProducts: React.FC = () => {
   const [catModalError, setCatModalError] = useState('');
 
   if (!currentUser) return null;
-  if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canEditProducts && !currentUser.permissions?.canDeleteProducts) return null;
+  if (
+    currentUser.role !== 'ADMIN' &&
+    !currentUser.permissions?.canEditProducts &&
+    !currentUser.permissions?.canDeleteProducts
+  )
+    return null;
 
   const settings = dbState.settings;
   const categories = dbState.categories || [];
   const shops = dbState.shops || [];
 
-  const availableFilterCategories = shopFilter === 'ALL'
-    ? categories
-    : categories.filter(c => c.shopId === shopFilter);
+  const availableFilterCategories =
+    shopFilter === 'ALL' ? categories : categories.filter(c => c.shopId === shopFilter);
 
   const allProducts = dbState.products || [];
 
@@ -89,7 +100,11 @@ export const AdminProducts: React.FC = () => {
     if (statusFilter !== 'ALL' && p.status !== statusFilter) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
-      return p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || p.barcode.toLowerCase().includes(q);
+      return (
+        p.name.toLowerCase().includes(q) ||
+        p.sku.toLowerCase().includes(q) ||
+        p.barcode.toLowerCase().includes(q)
+      );
     }
     return true;
   });
@@ -104,9 +119,7 @@ export const AdminProducts: React.FC = () => {
     }))
     .filter(group => group.products.length > 0);
 
-  const productsWithNoShop = products.filter(
-    p => !shops.some(s => s.id === p.shopId)
-  );
+  const productsWithNoShop = products.filter(p => !shops.some(s => s.id === p.shopId));
 
   const toggleShopCollapse = (shopId: string) => {
     setCollapsedShops(prev => {
@@ -117,15 +130,51 @@ export const AdminProducts: React.FC = () => {
     });
   };
 
+  // ==============================
+  // PAGINATION HELPERS
+  // ==============================
+  const getVisibleCount = (shopId: string): number => {
+    return visibleCounts[shopId] ?? PAGE_SIZE;
+  };
+
+  const handleSeeMore = (shopId: string) => {
+    // Show loading for a brief moment for a professional feel
+    setLoadingShops(prev => new Set(prev).add(shopId));
+    setTimeout(() => {
+      setVisibleCounts(prev => ({
+        ...prev,
+        [shopId]: (prev[shopId] ?? PAGE_SIZE) + PAGE_SIZE,
+      }));
+      setLoadingShops(prev => {
+        const next = new Set(prev);
+        next.delete(shopId);
+        return next;
+      });
+    }, 300);
+  };
+
+  const handleSeeLess = (shopId: string) => {
+    setVisibleCounts(prev => ({
+      ...prev,
+      [shopId]: PAGE_SIZE,
+    }));
+  };
+
   const openAddModal = () => {
     setEditingProduct(null);
-    const initialShopId = selectedShopId && selectedShopId !== 'ALL' ? selectedShopId : shops[0]?.id || '';
+    const initialShopId =
+      selectedShopId && selectedShopId !== 'ALL' ? selectedShopId : shops[0]?.id || '';
     setProductShopId(initialShopId);
     setName('');
     setSku('');
     setBarcode('');
     const shopCats = categories.filter(c => c.shopId === initialShopId && c.status !== 'INACTIVE');
-    setCategoryId(shopCats[0]?.id || categories.find(c => c.status !== 'INACTIVE')?.id || categories[0]?.id || '');
+    setCategoryId(
+      shopCats[0]?.id ||
+        categories.find(c => c.status !== 'INACTIVE')?.id ||
+        categories[0]?.id ||
+        ''
+    );
     setPurchasePrice('');
     setSellingPrice('');
     setCurrentStock('0');
@@ -232,7 +281,9 @@ export const AdminProducts: React.FC = () => {
         addToast({
           type: 'success',
           title: editingProduct ? 'Product Updated' : 'Product Created',
-          description: editingProduct ? `'${name}' details updated.` : `'${name}' added to inventory catalog.`,
+          description: editingProduct
+            ? `'${name}' details updated.`
+            : `'${name}' added to inventory catalog.`,
         });
         setIsModalOpen(false);
         setRefreshKey(prev => prev + 1);
@@ -285,7 +336,9 @@ export const AdminProducts: React.FC = () => {
   // Category Actions
   const openAddCategoryModal = (targetShopId?: string) => {
     setEditingCategory(null);
-    const defaultShop = targetShopId || (selectedShopId && selectedShopId !== 'ALL' ? selectedShopId : shops[0]?.id || '');
+    const defaultShop =
+      targetShopId ||
+      (selectedShopId && selectedShopId !== 'ALL' ? selectedShopId : shops[0]?.id || '');
     setCatShopIdInput(defaultShop);
     setCatNameInput('');
     setCatColorInput('#3b82f6');
@@ -323,7 +376,11 @@ export const AdminProducts: React.FC = () => {
         currentUser
       );
       if (res.success) {
-        addToast({ type: 'success', title: 'Category Updated', description: `Category '${catNameInput}' updated.` });
+        addToast({
+          type: 'success',
+          title: 'Category Updated',
+          description: `Category '${catNameInput}' updated.`,
+        });
         setIsCategoryModalOpen(false);
         setRefreshKey(prev => prev + 1);
       } else {
@@ -335,7 +392,11 @@ export const AdminProducts: React.FC = () => {
         currentUser
       );
       if (res.success) {
-        addToast({ type: 'success', title: 'Category Created', description: `New category '${catNameInput}' created.` });
+        addToast({
+          type: 'success',
+          title: 'Category Created',
+          description: `New category '${catNameInput}' created.`,
+        });
         setIsCategoryModalOpen(false);
         setRefreshKey(prev => prev + 1);
       } else {
@@ -351,22 +412,25 @@ export const AdminProducts: React.FC = () => {
       addToast({
         type: 'info',
         title: 'Category Status Updated',
-        description: `Category '${cat.name}' is now ${cat.status === 'INACTIVE' ? 'Active' : 'Inactive'}.`,
+        description: `Category '${cat.name}' is now ${
+          cat.status === 'INACTIVE' ? 'Active' : 'Inactive'
+        }.`,
       });
     }
   };
 
   // ==============================
-  // PRODUCT ROW RENDERER (shared by desktop table)
+  // PRODUCT ROW RENDERER
   // ==============================
   const renderProductRow = (product: Product) => {
     const cat = categories.find(c => c.id === product.categoryId);
     const shop = shops.find(s => s.id === product.shopId);
     const isLow = product.currentStock <= product.minStock;
     const proposedPrice = product.proposedSellingPrice || product.sellingPrice;
-    const marginPct = proposedPrice > 0
-      ? (((proposedPrice - product.purchasePrice) / proposedPrice) * 100).toFixed(1)
-      : '0';
+    const marginPct =
+      proposedPrice > 0
+        ? (((proposedPrice - product.purchasePrice) / proposedPrice) * 100).toFixed(1)
+        : '0';
 
     return (
       <tr
@@ -479,7 +543,9 @@ export const AdminProducts: React.FC = () => {
       {/* Header with Sub-Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-800">
         <div>
-          <h2 className="text-xl font-bold text-white tracking-tight">Products & Category Management</h2>
+          <h2 className="text-xl font-bold text-white tracking-tight">
+            Products & Category Management
+          </h2>
           <p className="text-xs text-slate-400 mt-0.5">
             Configure catalog pricing, active/deactivated items, and product classification categories
           </p>
@@ -490,7 +556,9 @@ export const AdminProducts: React.FC = () => {
             <button
               onClick={() => setActiveSubTab('products')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition ${
-                activeSubTab === 'products' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                activeSubTab === 'products'
+                  ? 'bg-blue-600 text-white shadow'
+                  : 'text-slate-400 hover:text-white'
               }`}
             >
               <Package className="w-3.5 h-3.5" />
@@ -499,7 +567,9 @@ export const AdminProducts: React.FC = () => {
             <button
               onClick={() => setActiveSubTab('categories')}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold transition ${
-                activeSubTab === 'categories' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                activeSubTab === 'categories'
+                  ? 'bg-blue-600 text-white shadow'
+                  : 'text-slate-400 hover:text-white'
               }`}
             >
               <FolderTree className="w-3.5 h-3.5" />
@@ -589,9 +659,7 @@ export const AdminProducts: React.FC = () => {
             </div>
           </div>
 
-          {/* ==============================
-              GROUPED BY SHOP VIEW
-          ============================== */}
+          {/* GROUPED BY SHOP VIEW */}
           {products.length === 0 ? (
             <div className="bg-slate-900 border border-slate-800 rounded-xl py-16 text-center text-slate-500">
               <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
@@ -608,6 +676,13 @@ export const AdminProducts: React.FC = () => {
                 const lowStockCount = shopProducts.filter(
                   p => p.status === 'ACTIVE' && p.currentStock <= p.minStock
                 ).length;
+
+                // Pagination
+                const visibleCount = getVisibleCount(shop.id);
+                const visibleProducts = shopProducts.slice(0, visibleCount);
+                const hasMore = shopProducts.length > visibleCount;
+                const remaining = shopProducts.length - visibleCount;
+                const isLoading = loadingShops.has(shop.id);
 
                 return (
                   <div
@@ -682,22 +757,74 @@ export const AdminProducts: React.FC = () => {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-800/60">
-                            {shopProducts.map(renderProductRow)}
+                            {visibleProducts.map(renderProductRow)}
                           </tbody>
                         </table>
+
+                        {/* Desktop See More / See Less */}
+                        {shopProducts.length > PAGE_SIZE && (
+                          <div className="px-5 py-3 border-t border-slate-800/60 bg-slate-950/30 flex items-center justify-between gap-3">
+                            <div className="text-[11px] text-slate-500">
+                              Showing{' '}
+                              <span className="text-slate-300 font-semibold">
+                                {Math.min(visibleCount, shopProducts.length)}
+                              </span>{' '}
+                              of{' '}
+                              <span className="text-slate-300 font-semibold">
+                                {shopProducts.length}
+                              </span>{' '}
+                              products
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {visibleCount > PAGE_SIZE && (
+                                <button
+                                  onClick={() => handleSeeLess(shop.id)}
+                                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+                                >
+                                  Show Less
+                                </button>
+                              )}
+                              {hasMore && (
+                                <button
+                                  onClick={() => handleSeeMore(shop.id)}
+                                  disabled={isLoading}
+                                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-xs font-semibold shadow transition disabled:opacity-60 disabled:cursor-wait"
+                                >
+                                  {isLoading ? (
+                                    <>
+                                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      <span>Loading...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <ChevronDown className="w-3.5 h-3.5" />
+                                      <span>
+                                        See More ({Math.min(PAGE_SIZE, remaining)} of {remaining})
+                                      </span>
+                                    </>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 
                     {/* Products Cards - Mobile */}
                     {!isCollapsed && (
                       <div className="md:hidden divide-y divide-slate-800/60">
-                        {shopProducts.map(product => {
+                        {visibleProducts.map(product => {
                           const cat = categories.find(c => c.id === product.categoryId);
                           const isLow = product.currentStock <= product.minStock;
-                          const proposedPrice = product.proposedSellingPrice || product.sellingPrice;
+                          const proposedPrice =
+                            product.proposedSellingPrice || product.sellingPrice;
                           const marginPct =
                             proposedPrice > 0
-                              ? (((proposedPrice - product.purchasePrice) / proposedPrice) * 100).toFixed(1)
+                              ? (
+                                  ((proposedPrice - product.purchasePrice) / proposedPrice) *
+                                  100
+                                ).toFixed(1)
                               : '0';
 
                           return (
@@ -736,7 +863,9 @@ export const AdminProducts: React.FC = () => {
                                       {cat?.name || 'General'}
                                     </span>
                                     {product.sku && (
-                                      <span className="font-mono text-slate-400">SKU: {product.sku}</span>
+                                      <span className="font-mono text-slate-400">
+                                        SKU: {product.sku}
+                                      </span>
                                     )}
                                   </div>
                                 </div>
@@ -746,7 +875,10 @@ export const AdminProducts: React.FC = () => {
                                 <div className="bg-slate-950/60 p-1.5 rounded-lg border border-slate-800">
                                   <div className="text-[9px] text-slate-400">Buying</div>
                                   <div className="font-mono text-[11px] text-slate-400">
-                                    {formatCurrency(product.purchasePrice, settings.currencySymbol)}
+                                    {formatCurrency(
+                                      product.purchasePrice,
+                                      settings.currencySymbol
+                                    )}
                                   </div>
                                 </div>
                                 <div className="bg-slate-950/60 p-1.5 rounded-lg border border-slate-800">
@@ -776,7 +908,8 @@ export const AdminProducts: React.FC = () => {
                                   Margin: <strong>{marginPct}%</strong>
                                 </div>
                                 <div className="flex items-center gap-1.5">
-                                  {(currentUser.role === 'ADMIN' || currentUser.permissions?.canEditProducts) && (
+                                  {(currentUser.role === 'ADMIN' ||
+                                    currentUser.permissions?.canEditProducts) && (
                                     <>
                                       <button
                                         onClick={() => openEditModal(product)}
@@ -794,11 +927,14 @@ export const AdminProducts: React.FC = () => {
                                         }`}
                                       >
                                         <Power className="w-3.5 h-3.5" />
-                                        <span>{product.status === 'ACTIVE' ? 'Off' : 'On'}</span>
+                                        <span>
+                                          {product.status === 'ACTIVE' ? 'Off' : 'On'}
+                                        </span>
                                       </button>
                                     </>
                                   )}
-                                  {(currentUser.role === 'ADMIN' || currentUser.permissions?.canDeleteProducts) && (
+                                  {(currentUser.role === 'ADMIN' ||
+                                    currentUser.permissions?.canDeleteProducts) && (
                                     <button
                                       onClick={() => setDeletingProduct(product)}
                                       className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 transition"
@@ -812,6 +948,41 @@ export const AdminProducts: React.FC = () => {
                             </div>
                           );
                         })}
+
+                        {/* Mobile See More / See Less */}
+                        {shopProducts.length > PAGE_SIZE && (
+                          <div className="p-3 bg-slate-950/30 flex items-center justify-between gap-2">
+                            <div className="text-[10px] text-slate-500">
+                              {Math.min(visibleCount, shopProducts.length)} / {shopProducts.length}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {visibleCount > PAGE_SIZE && (
+                                <button
+                                  onClick={() => handleSeeLess(shop.id)}
+                                  className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-300 text-[11px] font-semibold"
+                                >
+                                  Show Less
+                                </button>
+                              )}
+                              {hasMore && (
+                                <button
+                                  onClick={() => handleSeeMore(shop.id)}
+                                  disabled={isLoading}
+                                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-blue-600 text-white text-[11px] font-semibold disabled:opacity-60"
+                                >
+                                  {isLoading ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <>
+                                      <ChevronDown className="w-3.5 h-3.5" />
+                                      <span>See More</span>
+                                    </>
+                                  )}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -824,9 +995,7 @@ export const AdminProducts: React.FC = () => {
                   <div className="flex items-center gap-3 px-5 py-4 bg-amber-950/20 border-b border-amber-800/40">
                     <AlertCircle className="w-5 h-5 text-amber-400" />
                     <div>
-                      <h3 className="text-base font-bold text-white">
-                        Unassigned Products
-                      </h3>
+                      <h3 className="text-base font-bold text-white">Unassigned Products</h3>
                       <p className="text-xs text-slate-400 mt-0.5">
                         {productsWithNoShop.length} products have an invalid shop
                       </p>
@@ -869,7 +1038,8 @@ export const AdminProducts: React.FC = () => {
                 <span>Shop-Specific Categories</span>
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">
-                Every category is assigned to a specific shop to keep products neatly classified and isolated.
+                Every category is assigned to a specific shop to keep products neatly classified
+                and isolated.
               </p>
             </div>
 
@@ -897,7 +1067,10 @@ export const AdminProducts: React.FC = () => {
                 const productCount = allProducts.filter(p => p.categoryId === cat.id).length;
 
                 return (
-                  <div key={cat.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+                  <div
+                    key={cat.id}
+                    className="bg-slate-900 border border-slate-800 rounded-xl p-4"
+                  >
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
                         <div
@@ -908,19 +1081,36 @@ export const AdminProducts: React.FC = () => {
                         </div>
                         <div>
                           <h4 className="text-sm font-bold text-white">{cat.name}</h4>
-                          <p className="text-[10px] text-slate-400">{shop?.name || 'No Shop'} • {productCount} Products</p>
+                          <p className="text-[10px] text-slate-400">
+                            {shop?.name || 'No Shop'} • {productCount} Products
+                          </p>
                         </div>
                       </div>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        isActive ? 'bg-emerald-500/15 text-emerald-400' : 'bg-rose-500/15 text-rose-400'
-                      }`}>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          isActive
+                            ? 'bg-emerald-500/15 text-emerald-400'
+                            : 'bg-rose-500/15 text-rose-400'
+                        }`}
+                      >
                         {isActive ? 'Active' : 'Inactive'}
                       </span>
                     </div>
-                    {(currentUser.role === 'ADMIN' || currentUser.permissions?.canEditProducts) && (
+                    {(currentUser.role === 'ADMIN' ||
+                      currentUser.permissions?.canEditProducts) && (
                       <div className="flex gap-2">
-                        <button onClick={() => openEditCategoryModal(cat)} className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-xs">Edit</button>
-                        <button onClick={() => handleToggleCategoryStatus(cat)} className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-xs">Toggle</button>
+                        <button
+                          onClick={() => openEditCategoryModal(cat)}
+                          className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-xs"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleToggleCategoryStatus(cat)}
+                          className="px-2 py-1 rounded bg-slate-800 text-slate-300 text-xs"
+                        >
+                          Toggle
+                        </button>
                       </div>
                     )}
                   </div>
@@ -940,7 +1130,10 @@ export const AdminProducts: React.FC = () => {
                 <Trash2 className="w-5 h-5" />
                 <h3 className="text-base font-bold text-white">Delete Product?</h3>
               </div>
-              <button onClick={() => setDeletingProduct(null)} className="text-slate-400 hover:text-white p-1">
+              <button
+                onClick={() => setDeletingProduct(null)}
+                className="text-slate-400 hover:text-white p-1"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -950,8 +1143,10 @@ export const AdminProducts: React.FC = () => {
             </div>
 
             <p className="text-xs text-slate-400 mb-4">
-              Are you sure you want to delete <strong className="text-white">{deletingProduct.name}</strong>?
-              <br /><br />
+              Are you sure you want to delete{' '}
+              <strong className="text-white">{deletingProduct.name}</strong>?
+              <br />
+              <br />
               This will permanently remove the product from all shops and delete its images.
             </p>
 
@@ -984,7 +1179,10 @@ export const AdminProducts: React.FC = () => {
                   {editingProduct ? 'Edit Product Details' : 'Create New Product'}
                 </h3>
               </div>
-              <button onClick={() => setIsModalOpen(false)} className="text-slate-400 hover:text-white p-1">
+              <button
+                onClick={() => setIsModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -998,7 +1196,9 @@ export const AdminProducts: React.FC = () => {
 
             <form onSubmit={handleSaveProduct} className="space-y-4 text-xs">
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Assigned Shop / Unit *</label>
+                <label className="block text-slate-300 font-medium mb-1">
+                  Assigned Shop / Unit *
+                </label>
                 <select
                   value={productShopId}
                   onChange={e => handleProductShopChange(e.target.value)}
@@ -1006,11 +1206,15 @@ export const AdminProducts: React.FC = () => {
                 >
                   <option value="">Select shop...</option>
                   {shops.map(s => (
-                    <option key={s.id} value={s.id}>{s.name} ({s.code || 'UNIT'})</option>
+                    <option key={s.id} value={s.id}>
+                      {s.name} ({s.code || 'UNIT'})
+                    </option>
                   ))}
                 </select>
                 {shops.length === 0 && (
-                  <p className="text-[10px] text-rose-400 mt-1">No shops available. Create a shop first!</p>
+                  <p className="text-[10px] text-rose-400 mt-1">
+                    No shops available. Create a shop first!
+                  </p>
                 )}
               </div>
 
@@ -1028,7 +1232,9 @@ export const AdminProducts: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Purchasing Price</label>
+                  <label className="block text-slate-300 font-medium mb-1">
+                    Purchasing Price
+                  </label>
                   <input
                     type="number"
                     step="0.01"
@@ -1041,7 +1247,9 @@ export const AdminProducts: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Selling Price *</label>
+                  <label className="block text-slate-300 font-medium mb-1">
+                    Selling Price *
+                  </label>
                   <input
                     type="number"
                     step="0.01"
@@ -1087,7 +1295,8 @@ export const AdminProducts: React.FC = () => {
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="block text-slate-300 font-medium">Category *</label>
-                    {(currentUser.role === 'ADMIN' || currentUser.permissions?.canEditProducts) && (
+                    {(currentUser.role === 'ADMIN' ||
+                      currentUser.permissions?.canEditProducts) && (
                       <button
                         type="button"
                         onClick={() => openAddCategoryModal(productShopId)}
@@ -1105,7 +1314,11 @@ export const AdminProducts: React.FC = () => {
                   >
                     <option value="">Select category...</option>
                     {categories
-                      .filter(c => c.shopId === productShopId && (c.status !== 'INACTIVE' || c.id === categoryId))
+                      .filter(
+                        c =>
+                          c.shopId === productShopId &&
+                          (c.status !== 'INACTIVE' || c.id === categoryId)
+                      )
                       .map(c => (
                         <option key={c.id} value={c.id}>
                           {c.name} {c.status === 'INACTIVE' ? '(Inactive)' : ''}
@@ -1120,7 +1333,9 @@ export const AdminProducts: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Unit of Measure *</label>
+                  <label className="block text-slate-300 font-medium mb-1">
+                    Unit of Measure *
+                  </label>
                   <select
                     value={unit}
                     onChange={e => setUnit(e.target.value)}
@@ -1184,7 +1399,11 @@ export const AdminProducts: React.FC = () => {
                   disabled={isSaving || shops.length === 0}
                   className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow transition disabled:opacity-50"
                 >
-                  {isSaving ? 'Saving...' : editingProduct ? 'Save Changes' : 'Create Product'}
+                  {isSaving
+                    ? 'Saving...'
+                    : editingProduct
+                    ? 'Save Changes'
+                    : 'Create Product'}
                 </button>
               </div>
             </form>
@@ -1197,8 +1416,13 @@ export const AdminProducts: React.FC = () => {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
-              <h3 className="text-base font-bold text-white">{editingCategory ? 'Edit Category' : 'Create Category'}</h3>
-              <button onClick={() => setIsCategoryModalOpen(false)} className="text-slate-400 hover:text-white p-1">
+              <h3 className="text-base font-bold text-white">
+                {editingCategory ? 'Edit Category' : 'Create Category'}
+              </h3>
+              <button
+                onClick={() => setIsCategoryModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -1218,11 +1442,17 @@ export const AdminProducts: React.FC = () => {
                   className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white"
                 >
                   <option value="">Select shop...</option>
-                  {shops.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  {shops.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Category Name *</label>
+                <label className="block text-slate-300 font-medium mb-1">
+                  Category Name *
+                </label>
                 <input
                   type="text"
                   required
@@ -1234,20 +1464,35 @@ export const AdminProducts: React.FC = () => {
               <div>
                 <label className="block text-slate-300 font-medium mb-1">Color</label>
                 <div className="flex gap-2">
-                  {['#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4'].map(color => (
-                    <button
-                      key={color}
-                      type="button"
-                      onClick={() => setCatColorInput(color)}
-                      className={`w-7 h-7 rounded-full ${catColorInput === color ? 'ring-2 ring-white' : ''}`}
-                      style={{ backgroundColor: color }}
-                    />
-                  ))}
+                  {['#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#06b6d4'].map(
+                    color => (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => setCatColorInput(color)}
+                        className={`w-7 h-7 rounded-full ${
+                          catColorInput === color ? 'ring-2 ring-white' : ''
+                        }`}
+                        style={{ backgroundColor: color }}
+                      />
+                    )
+                  )}
                 </div>
               </div>
               <div className="flex justify-end gap-2 pt-3">
-                <button type="button" onClick={() => setIsCategoryModalOpen(false)} className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs">Cancel</button>
-                <button type="submit" className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs">{editingCategory ? 'Save' : 'Create'}</button>
+                <button
+                  type="button"
+                  onClick={() => setIsCategoryModalOpen(false)}
+                  className="px-4 py-2 rounded-lg bg-slate-800 text-slate-300 text-xs"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs"
+                >
+                  {editingCategory ? 'Save' : 'Create'}
+                </button>
               </div>
             </form>
           </div>
