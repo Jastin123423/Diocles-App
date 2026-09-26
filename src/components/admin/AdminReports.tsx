@@ -34,16 +34,16 @@ interface DeviationRow {
   productId: string;
   productName: string;
   sku: string;
-  referencePrice: number;   // 0 means no reference known
+  referencePrice: number;
   soldPrice: number;
-  purchasePrice: number;    // cost snapshot at sale time
+  purchasePrice: number;
   quantity: number;
-  diff: number;             // soldPrice - referencePrice
-  totalImpact: number;      // diff * qty
+  diff: number;
+  totalImpact: number;
   direction: 'ABOVE' | 'BELOW';
   usedSnapshot: boolean;
-  belowCost: boolean;       // soldPrice < purchasePrice
-  costLoss: number;         // (purchasePrice - soldPrice) * qty when belowCost
+  belowCost: boolean;
+  costLoss: number;
 }
 
 type DeviationDirection = 'ALL' | 'ABOVE' | 'BELOW' | 'BELOW_COST';
@@ -69,7 +69,7 @@ function computeRange(period: ReportPeriod, customFrom: string, customTo: string
 }
 
 // ─────────────────────────────────────────────────────────────
-// Section Header (collapsible + period picker)
+// Section Header
 // ─────────────────────────────────────────────────────────────
 const SectionHeader: React.FC<{
   title: string;
@@ -179,39 +179,32 @@ const SectionHeader: React.FC<{
 export const AdminReports: React.FC = () => {
   const { currentUser, dbState, addToast } = useApp();
 
-  // Income statement period
   const [reportPeriod, setReportPeriod] = useState<ReportPeriod>('today');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
 
-  // Deviation period
   const [deviationPeriod, setDeviationPeriod] = useState<ReportPeriod>('today');
   const [deviationStart, setDeviationStart] = useState('');
   const [deviationEnd, setDeviationEnd] = useState('');
 
-  // Shop period
   const [shopPeriod, setShopPeriod] = useState<ReportPeriod>('today');
   const [shopStart, setShopStart] = useState('');
   const [shopEnd, setShopEnd] = useState('');
 
-  // Product period
   const [productPeriod, setProductPeriod] = useState<ReportPeriod>('today');
   const [productStart, setProductStart] = useState('');
   const [productEnd, setProductEnd] = useState('');
 
-  // Seller period
   const [sellerPeriod, setSellerPeriod] = useState<ReportPeriod>('today');
   const [sellerStart, setSellerStart] = useState('');
   const [sellerEnd, setSellerEnd] = useState('');
 
-  // Collapse state
   const [incomeCollapsed, setIncomeCollapsed] = useState(false);
   const [deviationCollapsed, setDeviationCollapsed] = useState(false);
   const [shopsCollapsed, setShopsCollapsed] = useState(false);
   const [productsCollapsed, setProductsCollapsed] = useState(false);
   const [sellersCollapsed, setSellersCollapsed] = useState(false);
 
-  // Filters
   const [shopFilter, setShopFilter] = useState('ALL');
   const [productSearch, setProductSearch] = useState('');
   const [sellerSearch, setSellerSearch] = useState('');
@@ -225,14 +218,12 @@ export const AdminReports: React.FC = () => {
   const shops = dbState.shops || [];
   const products = dbState.products || [];
 
-  // Ranges per section
   const incomeRange = useMemo(() => computeRange(reportPeriod, customStartDate, customEndDate), [reportPeriod, customStartDate, customEndDate]);
   const deviationRange = useMemo(() => computeRange(deviationPeriod, deviationStart, deviationEnd), [deviationPeriod, deviationStart, deviationEnd]);
   const shopRange = useMemo(() => computeRange(shopPeriod, shopStart, shopEnd), [shopPeriod, shopStart, shopEnd]);
   const productRange = useMemo(() => computeRange(productPeriod, productStart, productEnd), [productPeriod, productStart, productEnd]);
   const sellerRange = useMemo(() => computeRange(sellerPeriod, sellerStart, sellerEnd), [sellerPeriod, sellerStart, sellerEnd]);
 
-  // Summaries
   const incomeSummary = useMemo(() => ReportService.getFinancialSummary(incomeRange, { shopId: shopFilter }, currentUser) || {}, [incomeRange, currentUser, dbState, shopFilter]);
   const shopSummary = useMemo(() => ReportService.getFinancialSummary(shopRange, { shopId: shopFilter }, currentUser) || {}, [shopRange, currentUser, dbState, shopFilter]);
   const productSummary = useMemo(() => ReportService.getFinancialSummary(productRange, { shopId: shopFilter }, currentUser) || {}, [productRange, currentUser, dbState, shopFilter]);
@@ -257,7 +248,7 @@ export const AdminReports: React.FC = () => {
     shopFilter === 'ALL' ? 'All Shops' : shops.find((s: any) => s.id === shopFilter)?.name || 'Unknown';
 
   // ─────────────────────────────────────────────────────────────
-  // Deviations — snapshot-first, below-cost detection, never skip
+  // Deviations — snapshot-first, below-cost detection
   // ─────────────────────────────────────────────────────────────
   const allDeviations = useMemo<DeviationRow[]>(() => {
     const sales = (deviationSummary as any).filteredSales || [];
@@ -270,7 +261,6 @@ export const AdminReports: React.FC = () => {
       for (const item of sale.items || []) {
         const product: any = productMap.get(item.productId);
 
-        // Reference resolution — snapshot preferred, current price fallback
         const hasSnapshot =
           item.referencePrice !== undefined &&
           item.referencePrice !== null &&
@@ -294,13 +284,11 @@ export const AdminReports: React.FC = () => {
         const purchasePrice = item.purchasePrice || 0;
         const qty = item.quantity || 0;
 
-        // Below-cost detection (works with or without a reference)
         const belowCost = purchasePrice > 0 && soldPrice < purchasePrice;
         const costLoss = belowCost
           ? Number(((purchasePrice - soldPrice) * qty).toFixed(2))
           : 0;
 
-        // Skip only if we truly can't classify the row
         if (referencePrice <= 0 && !belowCost) continue;
         if (referencePrice > 0 && soldPrice === referencePrice && !belowCost) continue;
 
@@ -496,7 +484,7 @@ export const AdminReports: React.FC = () => {
         </div>
         <table><thead><tr>
           <th>Date</th><th>Receipt</th><th>Shop</th><th>Seller</th><th>Product</th><th>SKU</th>
-          <th class="amount">Reference</th><th class="amount">Sold</th><th class="amount">Diff</th><th class="amount">Qty</th><th class="amount">Impact</th>
+          <th class="amount">Selling Price</th><th class="amount">Sold At</th><th class="amount">Diff</th><th class="amount">Qty</th><th class="amount">Impact</th>
         </tr></thead><tbody>
           ${deviations.map(d => `
             <tr class="${d.belowCost ? 'belowcost' : d.direction === 'BELOW' ? 'below' : 'above'}">
@@ -506,7 +494,7 @@ export const AdminReports: React.FC = () => {
               <td>${d.sellerName}</td>
               <td>${d.productName}${d.belowCost ? '<span class="loss-tag">LOSS</span>' : ''}</td>
               <td style="font-family:monospace;">${d.sku}</td>
-              <td class="amount">${d.referencePrice > 0 ? `${settings.currencySymbol} ${d.referencePrice.toLocaleString()}${!d.usedSnapshot ? '<span class="est">est.</span>' : ''}` : '—'}</td>
+              <td class="amount">${d.referencePrice > 0 ? `${settings.currencySymbol} ${d.referencePrice.toLocaleString()}${!d.usedSnapshot ? '<span class="est">*</span>' : ''}` : '—'}</td>
               <td class="amount">${settings.currencySymbol} ${d.soldPrice.toLocaleString()}</td>
               <td class="${d.direction === 'BELOW' ? 'diff-below' : 'diff-above'}">${d.referencePrice > 0 ? `${d.diff > 0 ? '+' : ''}${settings.currencySymbol} ${d.diff.toLocaleString()}` : '—'}</td>
               <td class="amount">${d.quantity}</td>
@@ -568,7 +556,7 @@ export const AdminReports: React.FC = () => {
     csv += `Below Reference Value,${deviationStats.belowImpact}\n`;
     csv += `Total Cost Loss,${deviationStats.costLoss}\n`;
     csv += `Above Reference Value,${deviationStats.aboveImpact}\n\n`;
-    csv += `Date,Receipt #,Shop,Seller,Product,SKU,Reference,Sold At,Purchase Cost,Diff,Qty,Impact,Direction,Below Cost,Reference Source\n`;
+    csv += `Date,Receipt #,Shop,Seller,Product,SKU,Selling Price,Sold At,Purchase Cost,Diff,Qty,Impact,Direction,Below Cost,Reference Source\n`;
     deviations.forEach(d => {
       csv += `"${formatDateTime(d.createdAt)}","${d.receiptNumber}","${d.shopName}","${d.sellerName}","${d.productName}","${d.sku}",${d.referencePrice},${d.soldPrice},${d.purchasePrice},${d.diff},${d.quantity},${d.totalImpact},${d.direction},${d.belowCost ? 'YES' : 'NO'},"${d.usedSnapshot ? 'Snapshot' : 'Current price'}"\n`;
     });
@@ -831,7 +819,7 @@ export const AdminReports: React.FC = () => {
                   {hiddenDeviationCount > 0 && ` · export CSV to see all`}
                 </div>
 
-                {/* Mobile-friendly cards */}
+                {/* ── Deviation cards ── */}
                 <div className="space-y-2">
                   {visibleDeviations.map((d, idx) => {
                     const isBelow = d.direction === 'BELOW';
@@ -847,18 +835,19 @@ export const AdminReports: React.FC = () => {
                       : 'text-emerald-300';
 
                     return (
-                      <div key={`${d.saleId}-${d.productId}-${idx}`} className={`rounded-xl p-3 border space-y-2 ${cardBg}`}>
-                        <div className="flex items-center justify-between gap-2">
+                      <div key={`${d.saleId}-${d.productId}-${idx}`} className={`rounded-xl p-3 border space-y-2.5 ${cardBg}`}>
+                        {/* Product name + LOSS badge + impact */}
+                        <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="text-xs font-semibold text-white truncate">{d.productName}</span>
+                              <span className="text-sm font-bold text-white truncate">{d.productName}</span>
                               {d.belowCost && (
                                 <span className="text-[9px] px-1.5 py-0.5 rounded bg-orange-500/30 text-orange-200 border border-orange-500/50 font-bold">
                                   LOSS
                                 </span>
                               )}
                             </div>
-                            <div className="text-[10px] text-slate-500 font-mono">{d.sku}</div>
+                            <div className="text-[10px] text-slate-500 font-mono mt-0.5">{d.sku}</div>
                           </div>
                           <div className={`shrink-0 text-right ${accentText}`}>
                             <div className="font-mono font-bold text-sm">
@@ -869,37 +858,35 @@ export const AdminReports: React.FC = () => {
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-4 gap-1.5 text-[10px]">
+                        {/* 3-column grid: Selling Price | Sold At | Qty */}
+                        <div className="grid grid-cols-3 gap-2 text-[11px]">
                           <div>
-                            <div className="text-slate-500 text-[9px]">Reference</div>
-                            <div className="font-mono text-slate-300">
+                            <div className="text-slate-500 text-[9px] uppercase tracking-wider mb-0.5">Selling Price</div>
+                            <div className="font-mono font-semibold text-slate-200">
                               {d.referencePrice > 0
                                 ? `${formatCurrency(d.referencePrice, settings.currencySymbol)}${!d.usedSnapshot ? '*' : ''}`
                                 : '—'}
                             </div>
                           </div>
                           <div>
-                            <div className="text-slate-500 text-[9px]">Sold</div>
+                            <div className="text-slate-500 text-[9px] uppercase tracking-wider mb-0.5">Sold At</div>
                             <div className={`font-mono font-bold ${accentText}`}>
                               {formatCurrency(d.soldPrice, settings.currencySymbol)}
                             </div>
                           </div>
                           <div>
-                            <div className="text-slate-500 text-[9px]">Cost</div>
-                            <div className="font-mono text-slate-400">
-                              {d.purchasePrice > 0 ? formatCurrency(d.purchasePrice, settings.currencySymbol) : '—'}
-                            </div>
-                          </div>
-                          <div>
-                            <div className="text-slate-500 text-[9px]">Qty</div>
-                            <div className="font-mono text-slate-200">{d.quantity}</div>
+                            <div className="text-slate-500 text-[9px] uppercase tracking-wider mb-0.5">Qty</div>
+                            <div className="font-mono font-semibold text-slate-200">{d.quantity}</div>
                           </div>
                         </div>
 
-                        <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/60 text-[10px] text-slate-400">
-                          <span className="font-mono truncate">{d.receiptNumber}</span>
-                          <span className="truncate max-w-[120px]">{d.sellerName}</span>
-                          <span className="font-mono shrink-0">{formatDateTime(d.createdAt).slice(5, 16)}</span>
+                        {/* Footer: receipt • seller (BOLD) • date */}
+                        <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/60 text-[10px]">
+                          <span className="font-mono text-slate-400 truncate">{d.receiptNumber}</span>
+                          <span className="font-bold text-slate-100 truncate max-w-[140px]" title={d.sellerName}>
+                            {d.sellerName}
+                          </span>
+                          <span className="font-mono text-slate-400 shrink-0">{formatDateTime(d.createdAt).slice(5, 16)}</span>
                         </div>
                       </div>
                     );
@@ -907,7 +894,7 @@ export const AdminReports: React.FC = () => {
                 </div>
 
                 <div className="text-[9px] text-slate-500 text-center italic">
-                  * = Reference estimated from current product price (legacy sale without snapshot)
+                  * = Selling Price estimated from current product (legacy sale)
                 </div>
               </div>
             )}
