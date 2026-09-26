@@ -26,7 +26,7 @@ export const LoginView: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [statusMsg, setStatusMsg] = useState('');
-  // 🔧 FIX: manual toggle for password visibility (used on Admin portal)
+  // Manual toggle for password visibility (used on Admin portal)
   const [showPassword, setShowPassword] = useState(false);
 
   const settings = dbState.settings;
@@ -114,11 +114,14 @@ export const LoginView: React.FC = () => {
           }
 
           // Still failing after refresh
-          setErrorMsg(retryResult.error || 'Authentication failed. Please verify credentials.');
+          setErrorMsg(
+            retryResult.error || 'Authentication failed. Please verify credentials.'
+          );
         } else {
           // Couldn't refresh (offline or error)
           setErrorMsg(
-            result.error || 'Account not found locally. Connect to internet to check for new accounts.'
+            result.error ||
+              'Account not found locally. Connect to internet to check for new accounts.'
           );
         }
         return;
@@ -134,12 +137,15 @@ export const LoginView: React.FC = () => {
     }
   };
 
-  // 🔧 FIX: Password is visible when SELLER portal is active.
-  //         Masked when ADMIN portal is active (unless admin manually toggles it).
+  // Password is visible when SELLER portal is active.
+  // Masked when ADMIN portal is active (unless admin manually toggles it).
   const passwordIsVisible = activePortal === 'SELLER' || showPassword;
 
   return (
-    <div id="login-screen" className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between select-none">
+    <div
+      id="login-screen"
+      className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between select-none"
+    >
       {/* Top Windows Bar Simulator */}
       <div className="flex items-center justify-between px-4 py-1.5 bg-slate-900 border-b border-slate-800 text-xs text-slate-400">
         <div className="flex items-center gap-2">
@@ -150,7 +156,9 @@ export const LoginView: React.FC = () => {
         </div>
         <div className="flex items-center gap-1.5">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
-          <span className="text-[11px] text-emerald-400 font-medium">Local Database Ready</span>
+          <span className="text-[11px] text-emerald-400 font-medium">
+            Local Database Ready
+          </span>
         </div>
       </div>
 
@@ -162,7 +170,9 @@ export const LoginView: React.FC = () => {
             <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center mx-auto mb-4 shadow-xl shadow-blue-500/10 border border-blue-400/30">
               <Boxes className="w-9 h-9 text-white" />
             </div>
-            <h1 className="text-2xl font-bold tracking-tight text-white">{settings.businessName}</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-white">
+              {settings.businessName}
+            </h1>
             <p className="text-sm text-slate-400 mt-1">{settings.tagline}</p>
           </div>
 
@@ -175,7 +185,6 @@ export const LoginView: React.FC = () => {
                 onClick={() => {
                   setActivePortal('SELLER');
                   setErrorMsg('');
-                  // 🔧 FIX: reset manual toggle when switching portals
                   setShowPassword(false);
                 }}
                 className={`flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-semibold transition-all ${
@@ -194,7 +203,6 @@ export const LoginView: React.FC = () => {
                 onClick={() => {
                   setActivePortal('ADMIN');
                   setErrorMsg('');
-                  // 🔧 FIX: reset manual toggle when switching portals
                   setShowPassword(false);
                 }}
                 className={`flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-semibold transition-all ${
@@ -226,6 +234,7 @@ export const LoginView: React.FC = () => {
 
             {/* Form */}
             <form onSubmit={handleLogin} className="space-y-4">
+              {/* Username */}
               <div>
                 <label className="block text-xs font-medium text-slate-300 mb-1.5">
                   {activePortal === 'ADMIN' ? 'Admin Username' : 'Seller Username / Account ID'}
@@ -239,39 +248,56 @@ export const LoginView: React.FC = () => {
                     type="text"
                     value={username}
                     onChange={e => setUsername(e.target.value)}
-                    placeholder={activePortal === 'ADMIN' ? 'Enter admin username' : 'Enter seller username'}
+                    placeholder={
+                      activePortal === 'ADMIN' ? 'Enter admin username' : 'Enter seller username'
+                    }
                     autoFocus
+                    autoComplete="off"
+                    autoCorrect="off"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    inputMode="text"
+                    enterKeyHint="next"
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
                   />
                 </div>
               </div>
 
+              {/* Password */}
               <div>
-                <label className="block text-xs font-medium text-slate-300 mb-1.5">Password</label>
+                <label className="block text-xs font-medium text-slate-300 mb-1.5">
+                  Password
+                </label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
                     <KeyRound className="w-4 h-4" />
                   </div>
 
-                  {/* 🔧 FIX: type is text when visible, password when hidden.
-                      Seller portal → always visible.
-                      Admin portal → hidden by default + eye toggle. */}
+                  {/* Always type="text" for friendly mobile keyboard.
+                      When hidden, characters are masked with -webkit-text-security. */}
                   <input
                     id="login-password-input"
-                    type={passwordIsVisible ? 'text' : 'password'}
+                    type="text"
                     value={password}
                     onChange={e => setPassword(e.target.value)}
                     placeholder="Enter password..."
-                    autoComplete="off"
+                    autoComplete="new-password"
                     autoCorrect="off"
                     autoCapitalize="off"
                     spellCheck={false}
+                    inputMode="text"
+                    enterKeyHint="done"
+                    style={
+                      passwordIsVisible
+                        ? undefined
+                        : ({ WebkitTextSecurity: 'disc' } as React.CSSProperties)
+                    }
                     className={`w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 ${
                       activePortal === 'ADMIN' ? 'pr-10' : 'pr-3'
                     } py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition`}
                   />
 
-                  {/* 🔧 FIX: Eye toggle only on ADMIN portal */}
+                  {/* Eye toggle only on ADMIN portal */}
                   {activePortal === 'ADMIN' && (
                     <button
                       type="button"
@@ -289,7 +315,7 @@ export const LoginView: React.FC = () => {
                   )}
                 </div>
 
-                {/* 🔧 FIX: Friendly hint on Seller portal */}
+                {/* Friendly hint on Seller portal */}
                 {activePortal === 'SELLER' && (
                   <p className="text-[10px] text-slate-500 mt-1.5 flex items-center gap-1">
                     <Eye className="w-3 h-3" />
@@ -326,7 +352,9 @@ export const LoginView: React.FC = () => {
                   </>
                 ) : (
                   <>
-                    <span>Sign In to {activePortal === 'ADMIN' ? 'Admin Portal' : 'POS Register'}</span>
+                    <span>
+                      Sign In to {activePortal === 'ADMIN' ? 'Admin Portal' : 'POS Register'}
+                    </span>
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
