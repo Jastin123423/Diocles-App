@@ -12,6 +12,7 @@ import {
   Landmark,
   Layers,
   CheckCircle,
+  AlertTriangle,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { SalesService } from '../../services/salesService';
@@ -20,8 +21,6 @@ import { formatCurrency } from '../../utils/formatters';
 import { ProductThumbnail } from '../common/ProductThumbnail';
 import { ProductImageViewerModal } from '../common/ProductImageViewerModal';
 
-// quantity can be a string (for in-progress editing like "" or "2")
-// or a number (once committed). We normalize at use-time.
 interface CartItem {
   product: Product;
   quantity: number | string;
@@ -91,7 +90,6 @@ export const NewSalePOS: React.FC = () => {
     );
   }, [cart]);
 
-  // Tax removed per requirement
   const totalAmount = useMemo(() => {
     const discounted = Math.max(0, subtotal - overallDiscount);
     return Number(discounted.toFixed(2));
@@ -154,11 +152,7 @@ export const NewSalePOS: React.FC = () => {
     );
   };
 
-  // Quantity editor:
-  //   - Allow empty string mid-edit (don't remove the row)
-  //   - Clamp values below 1 to 1
-  //   - Enforce stock ceiling
-  //   - Only the trash button removes a row
+  // Quantity editor
   const updateQuantity = (productId: string, rawValue: string) => {
     const item = cart.find(i => i.product.id === productId);
     if (!item) return;
@@ -190,7 +184,6 @@ export const NewSalePOS: React.FC = () => {
     );
   };
 
-  // On blur, if the field is empty or 0, normalize back to 1
   const handleQuantityBlur = (productId: string) => {
     setCart(prev =>
       prev.map(i => {
@@ -201,7 +194,6 @@ export const NewSalePOS: React.FC = () => {
     );
   };
 
-  // +/- step buttons — always operate on numeric values
   const stepQuantity = (productId: string, delta: number) => {
     const item = cart.find(i => i.product.id === productId);
     if (!item) return;
@@ -261,7 +253,6 @@ export const NewSalePOS: React.FC = () => {
       return;
     }
 
-    // Validate every row has a sensible quantity before submitting
     const invalid = cart.find(i => qtyNum(i.quantity) < 1);
     if (invalid) {
       addToast({
@@ -503,91 +494,111 @@ export const NewSalePOS: React.FC = () => {
               </p>
             </div>
           ) : (
-            cart.map(item => (
-              <div
-                key={item.product.id}
-                className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 space-y-2 transition"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    <ProductThumbnail
-                      product={item.product}
-                      size="sm"
-                      onClick={() => {
-                        setViewingProduct(item.product);
-                        setIsViewerOpen(true);
-                      }}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <h5 className="text-xs font-semibold text-white truncate">{item.product.name}</h5>
-                        <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 font-mono">
-                          {item.product.sku}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5 flex-wrap">
-                        <span className="font-semibold text-emerald-400 font-mono">
-                          Total: {formatCurrency(qtyNum(item.quantity) * item.unitPrice - item.discount, settings.currencySymbol)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+            cart.map(item => {
+              // 🔧 NEW: reference price for the "below price" warning
+              const referencePrice =
+                item.product.proposedSellingPrice || item.product.sellingPrice || 0;
+              const isBelowReference =
+                referencePrice > 0 && item.unitPrice > 0 && item.unitPrice < referencePrice;
 
-                  <button
-                    onClick={() => removeFromCart(item.product.id)}
-                    className="text-slate-500 hover:text-rose-400 p-1 shrink-0"
-                    title="Remove item"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {/* Price & Quantity Controls */}
-                <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-900">
-                  <div className="flex items-center gap-1.5">
-                    <label className="text-[10px] text-slate-400">Price:</label>
-                    <input
-                      type="number"
-                      step="any"
-                      min="0"
-                      value={item.unitPrice}
-                      onChange={e => updateUnitPrice(item.product.id, parseFloat(e.target.value) || 0)}
-                      className="w-20 bg-slate-900 border border-slate-800 rounded px-2 py-0.5 text-xs text-white font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
-                    />
-                  </div>
-
-                  <div className="flex items-center gap-1">
-                    <label className="text-[10px] text-slate-400">Qty:</label>
-                    <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded p-0.5">
-                      <button
-                        type="button"
-                        onClick={() => stepQuantity(item.product.id, -1)}
-                        className="w-5 h-5 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition"
-                      >
-                        <Minus className="w-3 h-3" />
-                      </button>
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        pattern="[0-9]*"
-                        value={item.quantity}
-                        onChange={e => updateQuantity(item.product.id, e.target.value)}
-                        onBlur={() => handleQuantityBlur(item.product.id)}
-                        onFocus={e => e.target.select()}
-                        className="w-10 bg-slate-950 border border-slate-700 rounded text-center text-xs font-bold text-white font-mono py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              return (
+                <div
+                  key={item.product.id}
+                  className="bg-slate-950 border border-slate-800 rounded-lg p-2.5 space-y-2 transition"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      <ProductThumbnail
+                        product={item.product}
+                        size="sm"
+                        onClick={() => {
+                          setViewingProduct(item.product);
+                          setIsViewerOpen(true);
+                        }}
                       />
-                      <button
-                        type="button"
-                        onClick={() => stepQuantity(item.product.id, 1)}
-                        className="w-5 h-5 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition"
-                      >
-                        <Plus className="w-3 h-3" />
-                      </button>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h5 className="text-xs font-semibold text-white truncate">{item.product.name}</h5>
+                          <span className="text-[10px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 font-mono">
+                            {item.product.sku}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5 flex-wrap">
+                          <span className="font-semibold text-emerald-400 font-mono">
+                            Total: {formatCurrency(qtyNum(item.quantity) * item.unitPrice - item.discount, settings.currencySymbol)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => removeFromCart(item.product.id)}
+                      className="text-slate-500 hover:text-rose-400 p-1 shrink-0"
+                      title="Remove item"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+
+                  {/* Price & Quantity Controls */}
+                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-900">
+                    <div className="flex items-center gap-1.5">
+                      <label className="text-[10px] text-slate-400">Price:</label>
+                      <input
+                        type="number"
+                        step="any"
+                        min="0"
+                        value={item.unitPrice}
+                        onChange={e => updateUnitPrice(item.product.id, parseFloat(e.target.value) || 0)}
+                        className={`w-20 bg-slate-900 border rounded px-2 py-0.5 text-xs text-white font-mono focus:outline-none focus:ring-1 ${
+                          isBelowReference
+                            ? 'border-rose-500/60 focus:ring-rose-500'
+                            : 'border-slate-800 focus:ring-blue-500'
+                        }`}
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <label className="text-[10px] text-slate-400">Qty:</label>
+                      <div className="flex items-center gap-1 bg-slate-900 border border-slate-800 rounded p-0.5">
+                        <button
+                          type="button"
+                          onClick={() => stepQuantity(item.product.id, -1)}
+                          className="w-5 h-5 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                        >
+                          <Minus className="w-3 h-3" />
+                        </button>
+                        <input
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          value={item.quantity}
+                          onChange={e => updateQuantity(item.product.id, e.target.value)}
+                          onBlur={() => handleQuantityBlur(item.product.id)}
+                          onFocus={e => e.target.select()}
+                          className="w-10 bg-slate-950 border border-slate-700 rounded text-center text-xs font-bold text-white font-mono py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => stepQuantity(item.product.id, 1)}
+                          className="w-5 h-5 rounded flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition"
+                        >
+                          <Plus className="w-3 h-3" />
+                        </button>
+                      </div>
                     </div>
                   </div>
+
+                  {/* 🔧 NEW: non-blocking warning when selling below the reference price */}
+                  {isBelowReference && (
+                    <div className="flex items-center gap-1.5 text-[10px] font-semibold text-rose-400 bg-rose-500/10 px-2 py-1 rounded border border-rose-500/25 mt-1">
+                      <AlertTriangle className="w-3 h-3 shrink-0" />
+                      <span>Unauza chini ya Bei elekezi</span>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 
