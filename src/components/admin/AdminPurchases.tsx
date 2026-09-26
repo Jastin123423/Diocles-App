@@ -14,11 +14,14 @@ import {
   Package,
   Check,
   ChevronDown,
+  Loader2,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { PurchaseService } from '../../services/purchaseService';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import type { Purchase } from '../../types';
+
+const PAGE_SIZE = 15;
 
 interface PurchaseItemInput {
   productId: string;
@@ -58,7 +61,6 @@ const ProductSearchSelect: React.FC<{
     [products, value]
   );
 
-  // Filter — multi-token, name + SKU, capped at 100 for perf
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return products.slice(0, 50);
@@ -73,14 +75,12 @@ const ProductSearchSelect: React.FC<{
 
   useEffect(() => { setHighlightIdx(0); }, [query, isOpen]);
 
-  // Scroll highlighted into view
   useEffect(() => {
     if (!isOpen || !listRef.current) return;
     const el = listRef.current.querySelector(`[data-idx="${highlightIdx}"]`) as HTMLElement | null;
     el?.scrollIntoView({ block: 'nearest' });
   }, [highlightIdx, isOpen]);
 
-  // Outside click
   useEffect(() => {
     if (!isOpen) return;
     const handler = (e: MouseEvent) => {
@@ -92,7 +92,6 @@ const ProductSearchSelect: React.FC<{
     return () => document.removeEventListener('mousedown', handler);
   }, [isOpen]);
 
-  // Autofocus search input on open
   useEffect(() => {
     if (isOpen) setTimeout(() => inputRef.current?.focus(), 30);
     else setQuery('');
@@ -121,7 +120,6 @@ const ProductSearchSelect: React.FC<{
 
   return (
     <div ref={containerRef} className="relative">
-      {/* Trigger button (mimics a select) */}
       <button
         type="button"
         onClick={() => setIsOpen(o => !o)}
@@ -147,12 +145,10 @@ const ProductSearchSelect: React.FC<{
         <ChevronDown className={`w-3.5 h-3.5 text-slate-400 shrink-0 transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
 
-      {/* Dropdown */}
       {isOpen && (
         <div
           className="absolute z-50 mt-1 left-0 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl w-[440px] max-w-[calc(100vw-4rem)] max-h-80 flex flex-col animate-in fade-in slide-in-from-top-1"
         >
-          {/* Search input */}
           <div className="p-2.5 border-b border-slate-800">
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
@@ -182,7 +178,6 @@ const ProductSearchSelect: React.FC<{
             </p>
           </div>
 
-          {/* Results */}
           <div ref={listRef} className="overflow-y-auto flex-1">
             {filtered.length === 0 ? (
               <div className="p-6 text-center">
@@ -228,7 +223,6 @@ const ProductSearchSelect: React.FC<{
             )}
           </div>
 
-          {/* Footer hint */}
           <div className="flex items-center justify-between px-3 py-1.5 border-t border-slate-800 bg-slate-950/60 text-[10px] text-slate-500">
             <span>↑↓ navigate • Enter select • Esc close</span>
             <span>{products.length} products</span>
@@ -248,6 +242,10 @@ export const AdminPurchases: React.FC = () => {
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingPurchase, setEditingPurchase] = useState<Purchase | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+
+  // Pagination state
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   // Purchase Form state
   const [purchaseShopId, setPurchaseShopId] = useState('');
@@ -281,24 +279,63 @@ export const AdminPurchases: React.FC = () => {
     p => !purchaseShopId || purchaseShopId === 'ALL' || p.shopId === purchaseShopId
   );
 
-  const purchases = PurchaseService.getPurchases(
-    {
-      shopId: isSeller ? (currentShop?.id || selectedShopId) : (selectedShopId === 'ALL' ? undefined : selectedShopId),
-    },
-    currentUser
-  ).filter(purchase => {
-    if (!searchQuery.trim()) return true;
-    const q = searchQuery.trim().toLowerCase();
-    if (purchase.supplierName.toLowerCase().includes(q)) return true;
-    if (purchase.purchaseNumber.toLowerCase().includes(q)) return true;
-    if (purchase.invoiceNumber && purchase.invoiceNumber.toLowerCase().includes(q)) return true;
-    if ((purchase.items || []).some(item =>
-      item.productName.toLowerCase().includes(q) ||
-      item.productId.toLowerCase().includes(q)
-    )) return true;
-    if (purchase.shopName && purchase.shopName.toLowerCase().includes(q)) return true;
-    return false;
-  });
+  // ✅ 1. Fetch + filter by search (UNCHANGED behavior)
+  // ✅ 2. Sort newest → oldest (newest first)
+  const purchases = useMemo(() => {
+    const filtered = PurchaseService.getPurchases(
+      {
+        shopId: isSeller
+          ? (currentShop?.id || selectedShopId)
+          : (selectedShopId === 'ALL' ? undefined : selectedShopId),
+      },
+      currentUser
+    ).filter(purchase => {
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.trim().toLowerCase();
+      if (purchase.supplierName.toLowerCase().includes(q)) return true;
+      if (purchase.purchaseNumber.toLowerCase().includes(q)) return true;
+      if (purchase.invoiceNumber && purchase.invoiceNumber.toLowerCase().includes(q)) return true;
+      if (
+        (purchase.items || []).some(
+          item =>
+            item.productName.toLowerCase().includes(q) ||
+            item.productId.toLowerCase().includes(q)
+        )
+      )
+        return true;
+      if (purchase.shopName && purchase.shopName.toLowerCase().includes(q)) return true;
+      return false;
+    });
+
+    // Sort: newest first (top) → oldest (bottom)
+    return [...filtered].sort((a, b) => {
+      const da = new Date(a.createdAt).getTime();
+      const db = new Date(b.createdAt).getTime();
+      return db - da;
+    });
+  }, [dbState.purchases, searchQuery, selectedShopId, currentShop, currentUser, isSeller]);
+
+  // Reset pagination when search or shop changes
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [searchQuery, selectedShopId]);
+
+  // Visible slice
+  const visiblePurchases = purchases.slice(0, visibleCount);
+  const hasMore = purchases.length > visibleCount;
+  const remaining = purchases.length - visibleCount;
+
+  const handleSeeMore = () => {
+    setIsLoadingMore(true);
+    setTimeout(() => {
+      setVisibleCount(prev => prev + PAGE_SIZE);
+      setIsLoadingMore(false);
+    }, 300);
+  };
+
+  const handleSeeLess = () => {
+    setVisibleCount(PAGE_SIZE);
+  };
 
   const openNewPurchaseModal = () => {
     const targetShop =
@@ -541,7 +578,7 @@ export const AdminPurchases: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                purchases.map(purchase => (
+                visiblePurchases.map(purchase => (
                   <tr key={purchase.id} className="hover:bg-slate-850/60 transition">
                     <td className="py-3.5 px-4 text-slate-400 font-mono">
                       {formatDateTime(purchase.createdAt)}
@@ -587,6 +624,52 @@ export const AdminPurchases: React.FC = () => {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Footer */}
+        {purchases.length > PAGE_SIZE && (
+          <div className="px-5 py-3 border-t border-slate-800/60 bg-slate-950/30 flex items-center justify-between gap-3">
+            <div className="text-[11px] text-slate-500">
+              Showing{' '}
+              <span className="text-slate-300 font-semibold">
+                {Math.min(visibleCount, purchases.length)}
+              </span>{' '}
+              of{' '}
+              <span className="text-slate-300 font-semibold">{purchases.length}</span>{' '}
+              purchase orders
+            </div>
+            <div className="flex items-center gap-2">
+              {visibleCount > PAGE_SIZE && (
+                <button
+                  onClick={handleSeeLess}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+                >
+                  Show Less
+                </button>
+              )}
+              {hasMore && (
+                <button
+                  onClick={handleSeeMore}
+                  disabled={isLoadingMore}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-xs font-semibold shadow transition disabled:opacity-60 disabled:cursor-wait"
+                >
+                  {isLoadingMore ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Loading...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-3.5 h-3.5" />
+                      <span>
+                        See More ({Math.min(PAGE_SIZE, remaining)} of {remaining})
+                      </span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Modal: New/Edit Purchase */}
@@ -642,7 +725,9 @@ export const AdminPurchases: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Supplier / Vendor Name (Optional)</label>
+                  <label className="block text-slate-300 font-medium mb-1">
+                    Supplier / Vendor Name (Optional)
+                  </label>
                   <input
                     type="text"
                     value={supplierName}
@@ -653,7 +738,9 @@ export const AdminPurchases: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Vendor Invoice # (Optional)</label>
+                  <label className="block text-slate-300 font-medium mb-1">
+                    Vendor Invoice # (Optional)
+                  </label>
                   <input
                     type="text"
                     value={invoiceNumber}
@@ -682,7 +769,8 @@ export const AdminPurchases: React.FC = () => {
 
                 {isEditMode && (
                   <div className="mb-2 p-2 rounded bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[10px]">
-                    ⚠️ Warning: Changing quantities will recalculate stock. The system will reverse old quantities and apply new ones.
+                    ⚠️ Warning: Changing quantities will recalculate stock. The system will reverse old
+                    quantities and apply new ones.
                   </div>
                 )}
 
@@ -692,7 +780,6 @@ export const AdminPurchases: React.FC = () => {
                       key={idx}
                       className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-2"
                     >
-                      {/* ★ Searchable product picker replaces the old <select> */}
                       <div className="flex-1 min-w-0">
                         <ProductSearchSelect
                           products={shopProducts.length > 0 ? shopProducts : dbState.products}
