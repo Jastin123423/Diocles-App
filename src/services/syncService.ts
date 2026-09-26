@@ -300,6 +300,24 @@ export class SyncService {
 
       cloudData.products.forEach((cloudProduct: any) => {
         const index = mergedProducts.findIndex(p => p.id === cloudProduct.id);
+
+        const productImages = (cloudData.productImages || [])
+          .filter((img: any) => img.product_id === cloudProduct.id)
+          .map((img: any) => ({
+            imageId: img.image_id,
+            productId: img.product_id,
+            imageOrder: img.image_order,
+            version: img.version,
+            dataUrl: img.r2_key,
+            thumbnailUrl: img.r2_key,
+            filename: img.filename,
+            mimeType: img.mime_type,
+            fileSize: img.file_size,
+            syncStatus: img.sync_status,
+            createdAt: img.created_at,
+            updatedAt: img.updated_at,
+          }));
+
         const productData = {
           id: cloudProduct.id,
           shopId: cloudProduct.shop_id,
@@ -315,6 +333,7 @@ export class SyncService {
           unit: cloudProduct.unit,
           status: cloudProduct.status,
           imageUrl: cloudProduct.image_url,
+          images: productImages.length > 0 ? productImages : undefined,
           createdAt: cloudProduct.created_at,
           updatedAt: cloudProduct.updated_at,
         };
