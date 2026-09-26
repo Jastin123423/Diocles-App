@@ -24,7 +24,7 @@ import { ProductImageViewerModal } from '../common/ProductImageViewerModal';
 interface CartItem {
   product: Product;
   quantity: number | string;
-  unitPrice: number;
+  unitPrice: number | string;   // 🔧 FIX: allow blank string mid-edit
   discount: number;
 }
 
@@ -47,21 +47,18 @@ export const NewSalePOS: React.FC = () => {
 
   const targetShopId = currentShop?.id || (selectedShopId !== 'ALL' ? selectedShopId : '') || (dbState.shops[0]?.id || '');
 
-  // Active products in currently selected shop
   const products = useMemo(() => {
     return dbState.products.filter(
       p => p.status === 'ACTIVE' && (!targetShopId || p.shopId === targetShopId || !p.shopId)
     );
   }, [dbState.products, targetShopId]);
 
-  // Categories for the current shop
   const categories = useMemo(() => {
     const all = dbState.categories || [];
     if (targetShopId === 'ALL') return all;
     return all.filter(c => c.shopId === targetShopId);
   }, [dbState.categories, targetShopId]);
 
-  // Filter products by search and category
   const filteredProducts = useMemo(() => {
     return products.filter(p => {
       const matchesCategory = selectedCategory === 'ALL' || p.categoryId === selectedCategory;
@@ -75,17 +72,26 @@ export const NewSalePOS: React.FC = () => {
     });
   }, [products, selectedCategory, searchQuery]);
 
-  // Safe numeric coercion for quantity
+  // ─────────────────────────────────────────────────────────────
+  // Numeric coercion helpers
+  // ─────────────────────────────────────────────────────────────
   const qtyNum = (q: number | string): number => {
     if (typeof q === 'number') return Number.isFinite(q) ? q : 0;
     const parsed = parseInt(q, 10);
     return Number.isFinite(parsed) ? parsed : 0;
   };
 
-  // Cart Calculations
+  // 🔧 FIX: safe numeric coercion for price (float-capable)
+  const priceNum = (p: number | string): number => {
+    if (typeof p === 'number') return Number.isFinite(p) ? p : 0;
+    const parsed = parseFloat(p);
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
+
+  // Cart Calculations (safe when price is blank)
   const subtotal = useMemo(() => {
     return cart.reduce(
-      (sum, item) => sum + qtyNum(item.quantity) * item.unitPrice - item.discount,
+      (sum, item) => sum + qtyNum(item.quantity) * priceNum(item.unitPrice) - item.discount,
       0
     );
   }, [cart]);
@@ -98,14 +104,13 @@ export const NewSalePOS: React.FC = () => {
   const tenderValue = parseFloat(amountReceived) || 0;
   const changeAmount = paymentMethod === 'CASH' ? Math.max(0, tenderValue - totalAmount) : 0;
 
-  // Auto-fill amount tendered with total when total changes
+  // Auto-fill amount tendered when total changes (skips if seller is editing price)
   useEffect(() => {
     if (paymentMethod === 'CASH') {
       setAmountReceived(totalAmount.toFixed(2));
     }
   }, [totalAmount, paymentMethod]);
 
-  // Add Product to Cart
   const addToCart = (product: Product) => {
     if (product.currentStock <= 0) {
       addToast({
@@ -146,13 +151,42 @@ export const NewSalePOS: React.FC = () => {
     });
   };
 
-  const updateUnitPrice = (productId: string, newPrice: number) => {
+  // 🔧 FIX: allow blank string mid-edit for price
+  const updateUnitPrice = (productId: string, rawValue: string) => {
+    if (rawValue === '') {
+      setCart(prev =>
+        prev.map(i => (i.product.id === productId ? { ...i, unitPrice: '' } : i))
+      );
+      return;
+    }
+
+    const parsed = parseFloat(rawValue);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      setCart(prev =>
+        prev.map(i => (i.product.id === productId ? { ...i, unitPrice: rawValue } : i))
+      );
+      return;
+    }
+
     setCart(prev =>
-      prev.map(i => (i.product.id === productId ? { ...i, unitPrice: Math.max(0, newPrice) } : i))
+      prev.map(i => (i.product.id === productId ? { ...i, unitPrice: rawValue } : i))
     );
   };
 
-  // Quantity editor
+  // 🔧 FIX: normalize blank/0 price back to the product's selling price on blur
+  const handlePriceBlur = (productId: string) => {
+    setCart(prev =>
+      prev.map(i => {
+        if (i.product.id !== productId) return i;
+        const n = priceNum(i.unitPrice);
+        if (i.unitPrice === '' || n <= 0) {
+          return { ...i, unitPrice: i.product.sellingPrice };
+        }
+        return { ...i, unitPrice: n };
+      })
+    );
+  };
+
   const updateQuantity = (productId: string, rawValue: string) => {
     const item = cart.find(i => i.product.id === productId);
     if (!item) return;
@@ -212,7 +246,6 @@ export const NewSalePOS: React.FC = () => {
     setSaleNotes('');
   };
 
-  // Handle Barcode Scan
   const handleBarcodeSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!barcodeInput.trim()) return;
@@ -240,7 +273,6 @@ export const NewSalePOS: React.FC = () => {
     }
   };
 
-  // Complete Sale
   const handleCompleteSale = () => {
     if (!currentUser) return;
 
@@ -259,6 +291,17 @@ export const NewSalePOS: React.FC = () => {
         type: 'error',
         title: 'Invalid Quantity',
         description: `Please set a quantity of at least 1 for ${invalid.product.name}.`,
+      });
+      return;
+    }
+
+    // 🔧 FIX: reject blank / 0 prices before submitting
+    const invalidPrice = cart.find(i => priceNum(i.unitPrice) <= 0);
+    if (invalidPrice) {
+      addToast({
+        type: 'error',
+        title: 'Invalid Price',
+        description: `Please set a price greater than 0 for ${invalidPrice.product.name}.`,
       });
       return;
     }
@@ -282,7 +325,7 @@ export const NewSalePOS: React.FC = () => {
         items: cart.map(i => ({
           productId: i.product.id,
           quantity: qtyNum(i.quantity),
-          unitPrice: i.unitPrice,
+          unitPrice: priceNum(i.unitPrice),   // 🔧 FIX: use safe price coercion
           discount: i.discount,
         })),
         paymentMethod,
@@ -314,7 +357,7 @@ export const NewSalePOS: React.FC = () => {
 
   return (
     <div id="pos-terminal" className="flex-1 flex overflow-hidden bg-slate-950 text-slate-100 select-none">
-      {/* Left: Product Catalog & Search (60%) */}
+      {/* Left: Product Catalog & Search */}
       <div className="flex-1 flex flex-col border-r border-slate-800 overflow-hidden">
         {/* Search & Barcode Scan Bar */}
         <div className="p-3.5 bg-slate-900 border-b border-slate-800 space-y-2.5">
@@ -461,7 +504,7 @@ export const NewSalePOS: React.FC = () => {
         </div>
       </div>
 
-      {/* Right: Cart, Tender & Checkout (40%) */}
+      {/* Right: Cart, Tender & Checkout */}
       <div className="w-[420px] bg-slate-900 flex flex-col justify-between shrink-0 overflow-hidden">
         {/* Cart Header */}
         <div className="p-3.5 border-b border-slate-800 bg-slate-950/50 flex items-center justify-between">
@@ -495,11 +538,11 @@ export const NewSalePOS: React.FC = () => {
             </div>
           ) : (
             cart.map(item => {
-              // 🔧 NEW: reference price for the "below price" warning
               const referencePrice =
                 item.product.proposedSellingPrice || item.product.sellingPrice || 0;
+              const unitPriceNum = priceNum(item.unitPrice);
               const isBelowReference =
-                referencePrice > 0 && item.unitPrice > 0 && item.unitPrice < referencePrice;
+                referencePrice > 0 && unitPriceNum > 0 && unitPriceNum < referencePrice;
 
               return (
                 <div
@@ -525,7 +568,7 @@ export const NewSalePOS: React.FC = () => {
                         </div>
                         <div className="flex items-center gap-2 text-[11px] text-slate-400 mt-0.5 flex-wrap">
                           <span className="font-semibold text-emerald-400 font-mono">
-                            Total: {formatCurrency(qtyNum(item.quantity) * item.unitPrice - item.discount, settings.currencySymbol)}
+                            Total: {formatCurrency(qtyNum(item.quantity) * priceNum(item.unitPrice) - item.discount, settings.currencySymbol)}
                           </span>
                         </div>
                       </div>
@@ -544,12 +587,14 @@ export const NewSalePOS: React.FC = () => {
                   <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-900">
                     <div className="flex items-center gap-1.5">
                       <label className="text-[10px] text-slate-400">Price:</label>
+                      {/* 🔧 FIX: text input, allows blank state mid-edit; onBlur normalizes */}
                       <input
-                        type="number"
-                        step="any"
-                        min="0"
+                        type="text"
+                        inputMode="decimal"
                         value={item.unitPrice}
-                        onChange={e => updateUnitPrice(item.product.id, parseFloat(e.target.value) || 0)}
+                        onChange={e => updateUnitPrice(item.product.id, e.target.value)}
+                        onBlur={() => handlePriceBlur(item.product.id)}
+                        onFocus={e => e.target.select()}
                         className={`w-20 bg-slate-900 border rounded px-2 py-0.5 text-xs text-white font-mono focus:outline-none focus:ring-1 ${
                           isBelowReference
                             ? 'border-rose-500/60 focus:ring-rose-500'
@@ -589,7 +634,7 @@ export const NewSalePOS: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* 🔧 NEW: non-blocking warning when selling below the reference price */}
+                  {/* Non-blocking warning when selling below the reference price */}
                   {isBelowReference && (
                     <div className="flex items-center gap-1.5 text-[10px] font-semibold text-rose-400 bg-rose-500/10 px-2 py-1 rounded border border-rose-500/25 mt-1">
                       <AlertTriangle className="w-3 h-3 shrink-0" />
