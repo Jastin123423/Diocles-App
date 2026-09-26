@@ -1,13 +1,25 @@
-import React, { useState, useMemo } from 'react';
-import { Search, Receipt, Calendar, Filter, Eye, Pencil, X, CheckCircle } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import {
+  Search,
+  Receipt,
+  Calendar,
+  Filter,
+  Eye,
+  Pencil,
+  X,
+  CheckCircle,
+} from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { SalesService, CartItemInput } from '../../services/salesService';
 import { Sale } from '../../types';
 import { formatCurrency, formatDateTime } from '../../utils/formatters';
 
+type DatePreset = 'TODAY' | 'WEEK' | 'MONTH' | 'CUSTOM';
+
 export const SellerSales: React.FC = () => {
   const { currentUser, showReceipt, dbState, addToast } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
+  const [datePreset, setDatePreset] = useState<DatePreset>('TODAY');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [paymentFilter, setPaymentFilter] = useState('ALL');
@@ -17,16 +29,56 @@ export const SellerSales: React.FC = () => {
   const [editItems, setEditItems] = useState<CartItemInput[]>([]);
   const [editReason, setEditReason] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
-  // Track which sales have pending edit requests
+
+  // Track pending edit requests
   const [submittedSaleIds, setSubmittedSaleIds] = useState<Set<string>>(new Set());
+
+  // ---------- Date helpers ----------
+  const toYMD = (d: Date): string => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  };
+
+  const computePresetRange = (
+    preset: DatePreset
+  ): { start: string; end: string } | null => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    if (preset === 'TODAY') {
+      return { start: toYMD(today), end: toYMD(today) };
+    }
+    if (preset === 'WEEK') {
+      const start = new Date(today);
+      start.setDate(start.getDate() - 6); // last 7 days rolling
+      return { start: toYMD(start), end: toYMD(today) };
+    }
+    if (preset === 'MONTH') {
+      const start = new Date(today.getFullYear(), today.getMonth(), 1);
+      return { start: toYMD(start), end: toYMD(today) };
+    }
+    return null; // CUSTOM
+  };
+
+  // Apply preset → compute start/end
+  useEffect(() => {
+    if (datePreset === 'CUSTOM') return;
+    const range = computePresetRange(datePreset);
+    if (range) {
+      setStartDate(range.start);
+      setEndDate(range.end);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [datePreset]);
 
   if (!currentUser) return null;
 
   const settings = dbState.settings;
   const products = dbState.products || [];
 
-  // Get pending edit requests for this seller
+  // Pending edit requests
   const pendingRequests = useMemo(() => {
     const requests = dbState.saleEditRequests || [];
     return requests.filter(
@@ -34,14 +86,13 @@ export const SellerSales: React.FC = () => {
     );
   }, [dbState.saleEditRequests, currentUser.id]);
 
-  // Combine with local state
   const pendingSaleIds = useMemo(() => {
     const ids = new Set(submittedSaleIds);
     pendingRequests.forEach(r => ids.add(r.saleId));
     return ids;
   }, [submittedSaleIds, pendingRequests]);
 
-  // Query sales restricted to current seller
+  // Query sales
   const sales = SalesService.getSales(
     {
       search: searchQuery,
@@ -68,7 +119,7 @@ export const SellerSales: React.FC = () => {
     setEditReason('');
   };
 
-  // Handle submit edit request
+  // Submit edit request
   const handleSubmitEditRequest = () => {
     if (!editingSale || !currentUser) return;
 
@@ -82,24 +133,23 @@ export const SellerSales: React.FC = () => {
     }
 
     setIsSubmitting(true);
-    
+
     const result = SalesService.requestSaleEdit(
       editingSale.id,
       editItems,
       editReason,
       currentUser
     );
-    
+
     setIsSubmitting(false);
 
     if (result.success) {
-      // Add sale ID to submitted set
       setSubmittedSaleIds(prev => {
         const newSet = new Set(prev);
         newSet.add(editingSale.id);
         return newSet;
       });
-      
+
       addToast({
         type: 'success',
         title: 'Ombi Limesafirishwa',
@@ -117,6 +167,55 @@ export const SellerSales: React.FC = () => {
     }
   };
 
+  const getPeriodLabel = () => {
+    switch (datePreset) {
+      case 'TODAY':
+        return 'Today';
+      case 'WEEK':
+        return 'Last 7 Days';
+      case 'MONTH':
+        return 'This Month';
+      case 'CUSTOM':
+        return 'Custom Range';
+      default:
+        return 'Today';
+    }
+  };
+
+  const hasActiveFilters =
+    searchQuery ||
+    paymentFilter !== 'ALL' ||
+    datePreset !== 'TODAY' ||
+    (datePreset === 'CUSTOM' && (startDate || endDate));
+
+  // Colored presets
+  const presets: { id: DatePreset; label: string; activeClass: string; idleClass: string }[] = [
+    {
+      id: 'TODAY',
+      label: 'Today',
+      activeClass: 'bg-blue-600 border-blue-500 text-white shadow-md shadow-blue-500/30',
+      idleClass: 'bg-blue-500/10 border-blue-500/30 text-blue-300 hover:bg-blue-500/20',
+    },
+    {
+      id: 'WEEK',
+      label: 'Week',
+      activeClass: 'bg-emerald-600 border-emerald-500 text-white shadow-md shadow-emerald-500/30',
+      idleClass: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20',
+    },
+    {
+      id: 'MONTH',
+      label: 'Month',
+      activeClass: 'bg-violet-600 border-violet-500 text-white shadow-md shadow-violet-500/30',
+      idleClass: 'bg-violet-500/10 border-violet-500/30 text-violet-300 hover:bg-violet-500/20',
+    },
+    {
+      id: 'CUSTOM',
+      label: 'Custom',
+      activeClass: 'bg-amber-500 border-amber-400 text-white shadow-md shadow-amber-500/30',
+      idleClass: 'bg-amber-500/10 border-amber-500/30 text-amber-300 hover:bg-amber-500/20',
+    },
+  ];
+
   return (
     <div id="seller-sales-view" className="flex-1 p-6 bg-slate-950 text-slate-100 overflow-y-auto">
       {/* Header */}
@@ -131,7 +230,7 @@ export const SellerSales: React.FC = () => {
         <div className="p-3 bg-slate-900 border border-slate-800 rounded-xl flex items-center gap-3">
           <div className="text-right">
             <span className="text-[10px] text-slate-400 font-semibold uppercase tracking-wider block">
-              Filtered Volume
+              Filtered Volume ({getPeriodLabel()})
             </span>
             <span className="text-base font-bold text-emerald-400 font-mono">
               {formatCurrency(totalVolume, settings.currencySymbol)}
@@ -148,9 +247,10 @@ export const SellerSales: React.FC = () => {
       </div>
 
       {/* Filter Toolbar */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 mb-5 flex flex-wrap items-center justify-between gap-3 text-xs">
-        <div className="flex items-center gap-3 flex-1 min-w-[260px]">
-          <div className="relative flex-1">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 mb-5 space-y-3 text-xs">
+        {/* Search + Payment */}
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative flex-1 min-w-[240px]">
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
             <input
               type="text"
@@ -174,40 +274,76 @@ export const SellerSales: React.FC = () => {
           </select>
         </div>
 
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-1 text-slate-400">
-            <Calendar className="w-3.5 h-3.5" />
-            <input
-              type="date"
-              value={startDate}
-              onChange={e => setStartDate(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white"
-            />
-            <span>to</span>
-            <input
-              type="date"
-              value={endDate}
-              onChange={e => setEndDate(e.target.value)}
-              className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white"
-            />
+        {/* Period Preset Pills */}
+        <div className="pt-3 border-t border-slate-800/80">
+          <div className="flex items-center gap-2 mb-2">
+            <Calendar className="w-3.5 h-3.5 text-slate-400" />
+            <span className="text-slate-400 text-[11px] font-semibold uppercase tracking-wider">
+              Period
+            </span>
           </div>
-          {(startDate || endDate || searchQuery || paymentFilter !== 'ALL') && (
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex items-center gap-1.5">
+              {presets.map(p => {
+                const isActive = datePreset === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setDatePreset(p.id)}
+                    className={`px-4 py-2 rounded-lg border text-xs font-semibold transition active:scale-95 ${
+                      isActive ? p.activeClass : p.idleClass
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Custom date inputs — inline on PC */}
+            {datePreset === 'CUSTOM' && (
+              <div className="flex items-center gap-2 pl-3 border-l border-slate-800 animate-in fade-in duration-150">
+                <label className="text-[10px] text-slate-500 uppercase tracking-wider">
+                  From
+                </label>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={e => setStartDate(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
+                <label className="text-[10px] text-slate-500 uppercase tracking-wider">To</label>
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={e => setEndDate(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+                />
+              </div>
+            )}
+          </div>
+        </div>
+
+        {hasActiveFilters && (
+          <div className="pt-2 border-t border-slate-800/80 flex justify-end">
             <button
               onClick={() => {
-                setStartDate('');
-                setEndDate('');
                 setSearchQuery('');
                 setPaymentFilter('ALL');
+                setDatePreset('TODAY');
+                // startDate/endDate auto-set by useEffect
               }}
-              className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-300 font-medium transition"
+              className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition"
             >
-              Reset
+              Reset Filters
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
-      {/* Sales List Table */}
+      {/* Sales Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
@@ -234,13 +370,20 @@ export const SellerSales: React.FC = () => {
                 sales.map(sale => {
                   const isVoided = sale.status === 'VOIDED';
                   const hasPendingRequest = pendingSaleIds.has(sale.id);
-                  
+
                   return (
-                    <tr key={sale.id} className={`hover:bg-slate-850/60 transition ${isVoided ? 'opacity-65' : ''}`}>
+                    <tr
+                      key={sale.id}
+                      className={`hover:bg-slate-850/60 transition ${
+                        isVoided ? 'opacity-65' : ''
+                      }`}
+                    >
                       <td className="py-3.5 px-4 font-mono font-bold text-white">
                         {sale.receiptNumber}
                       </td>
-                      <td className="py-3.5 px-4 text-slate-400">{formatDateTime(sale.createdAt)}</td>
+                      <td className="py-3.5 px-4 text-slate-400">
+                        {formatDateTime(sale.createdAt)}
+                      </td>
                       <td className="py-3.5 px-4 max-w-xs">
                         <div className="flex flex-wrap gap-1">
                           {(sale.items || []).map((item, idx) => (
@@ -273,7 +416,7 @@ export const SellerSales: React.FC = () => {
                       <td className="py-3.5 px-4 text-right font-mono font-bold text-emerald-400 text-sm">
                         {formatCurrency(sale.total, settings.currencySymbol)}
                       </td>
-                      <td className="py-3.5 px-4 text-right space-x-1.5">
+                      <td className="py-3.5 px-4 text-right space-x-1.5 whitespace-nowrap">
                         <button
                           onClick={() => showReceipt(sale)}
                           className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-blue-600/20 hover:bg-blue-600 text-blue-300 hover:text-white text-[11px] font-semibold transition"
@@ -281,8 +424,8 @@ export const SellerSales: React.FC = () => {
                           <Eye className="w-3 h-3" />
                           <span>View</span>
                         </button>
-                        {!isVoided && (
-                          hasPendingRequest ? (
+                        {!isVoided &&
+                          (hasPendingRequest ? (
                             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-amber-500/10 text-amber-400 text-[11px] font-semibold border border-amber-500/20">
                               <CheckCircle className="w-3 h-3" />
                               <span>Submitted</span>
@@ -295,8 +438,7 @@ export const SellerSales: React.FC = () => {
                               <Pencil className="w-3 h-3" />
                               <span>Request Edit</span>
                             </button>
-                          )
-                        )}
+                          ))}
                       </td>
                     </tr>
                   );
@@ -314,20 +456,28 @@ export const SellerSales: React.FC = () => {
             <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
               <div className="flex items-center gap-2 text-amber-400">
                 <Pencil className="w-5 h-5" />
-                <h3 className="text-base font-bold text-white">Request Edit - {editingSale.receiptNumber}</h3>
+                <h3 className="text-base font-bold text-white">
+                  Request Edit - {editingSale.receiptNumber}
+                </h3>
               </div>
-              <button onClick={() => setEditingSale(null)} className="text-slate-400 hover:text-white p-1">
+              <button
+                onClick={() => setEditingSale(null)}
+                className="text-slate-400 hover:text-white p-1"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-xl text-blue-200 text-xs mb-4">
-              <strong>Approval Required:</strong> Your edit request will be sent to admin for review. Stock will be adjusted after approval.
+              <strong>Approval Required:</strong> Your edit request will be sent to admin for
+              review. Stock will be adjusted after approval.
             </div>
 
             <div className="space-y-3 mb-4">
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Sababu ya Marekebisho *</label>
+                <label className="block text-slate-300 font-medium mb-1">
+                  Sababu ya Marekebisho *
+                </label>
                 <input
                   type="text"
                   value={editReason}
@@ -341,10 +491,17 @@ export const SellerSales: React.FC = () => {
                 {editItems.map((item, idx) => {
                   const product = products.find(p => p.id === item.productId);
                   return (
-                    <div key={idx} className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-2">
+                    <div
+                      key={idx}
+                      className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-2"
+                    >
                       <div className="flex-1">
-                        <span className="text-white text-xs font-semibold">{product?.name || 'Unknown'}</span>
-                        <span className="text-slate-500 text-[10px] block">{product?.sku || ''}</span>
+                        <span className="text-white text-xs font-semibold">
+                          {product?.name || 'Unknown'}
+                        </span>
+                        <span className="text-slate-500 text-[10px] block">
+                          {product?.sku || ''}
+                        </span>
                       </div>
                       <div className="w-20">
                         <label className="text-[10px] text-slate-400 block">Idadi</label>
@@ -355,9 +512,9 @@ export const SellerSales: React.FC = () => {
                           onChange={e => {
                             const val = e.target.value;
                             const newItems = [...editItems];
-                            newItems[idx] = { 
-                              ...newItems[idx], 
-                              quantity: val === '' ? '' as any : parseInt(val) || 0 
+                            newItems[idx] = {
+                              ...newItems[idx],
+                              quantity: val === '' ? ('' as any) : parseInt(val) || 0,
                             };
                             setEditItems(newItems);
                           }}
@@ -374,9 +531,9 @@ export const SellerSales: React.FC = () => {
                           onChange={e => {
                             const val = e.target.value;
                             const newItems = [...editItems];
-                            newItems[idx] = { 
-                              ...newItems[idx], 
-                              unitPrice: val === '' ? '' as any : parseFloat(val) || 0 
+                            newItems[idx] = {
+                              ...newItems[idx],
+                              unitPrice: val === '' ? ('' as any) : parseFloat(val) || 0,
                             };
                             setEditItems(newItems);
                           }}
@@ -393,9 +550,9 @@ export const SellerSales: React.FC = () => {
                           onChange={e => {
                             const val = e.target.value;
                             const newItems = [...editItems];
-                            newItems[idx] = { 
-                              ...newItems[idx], 
-                              discount: val === '' ? 0 : parseFloat(val) || 0 
+                            newItems[idx] = {
+                              ...newItems[idx],
+                              discount: val === '' ? 0 : parseFloat(val) || 0,
                             };
                             setEditItems(newItems);
                           }}
