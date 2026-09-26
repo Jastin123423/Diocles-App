@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Search,
   Plus,
@@ -8,6 +8,8 @@ import {
   CheckCircle,
   AlertCircle,
   Filter,
+  ChevronDown,
+  Loader2,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { ProductService } from '../../services/productService';
@@ -18,12 +20,18 @@ import { ProductThumbnail } from '../common/ProductThumbnail';
 import { ProductImageViewerModal } from '../common/ProductImageViewerModal';
 import { ProductImageUpload } from '../common/ProductImageUpload';
 
+const PAGE_SIZE = 10;
+
 export const SellerProducts: React.FC = () => {
   const { currentUser, dbState, addToast, sellerColor, selectedShopId, currentShop } = useApp();
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('ALL');
   const [showAddModal, setShowAddModal] = useState(false);
   const [showEditDeniedModal, setShowEditDeniedModal] = useState(false);
+
+  // Pagination
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
 
   // New Product Form State
   const [name, setName] = useState('');
@@ -46,17 +54,40 @@ export const SellerProducts: React.FC = () => {
   const settings = dbState.settings;
   const categories = dbState.categories;
 
-  const targetShopId = currentShop?.id || (selectedShopId && selectedShopId !== 'ALL' ? selectedShopId : dbState.shops[0]?.id || '');
+  const targetShopId =
+    currentShop?.id ||
+    (selectedShopId && selectedShopId !== 'ALL' ? selectedShopId : dbState.shops[0]?.id || '');
   const allCategories = dbState.categories || [];
   const shopCategories = allCategories.filter(c => c.shopId === targetShopId);
 
-  // Filtered Products
-  const products = ProductService.getProducts({
-    shopId: targetShopId,
-    categoryId: selectedCategory === 'ALL' ? undefined : selectedCategory,
-    search: searchQuery,
-    status: 'ACTIVE',
-  });
+  // Filtered Products — search/filter unchanged
+  const products = useMemo(() => {
+    return ProductService.getProducts({
+      shopId: targetShopId,
+      categoryId: selectedCategory === 'ALL' ? undefined : selectedCategory,
+      search: searchQuery,
+      status: 'ACTIVE',
+    });
+  }, [targetShopId, selectedCategory, searchQuery, dbState.products]);
+
+  // Reset pagination on filter/search change
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [searchQuery, selectedCategory, targetShopId]);
+
+  const visibleProducts = products.slice(0, visibleCount);
+  const hasMore = products.length > visibleCount;
+  const remaining = products.length - visibleCount;
+
+  const handleSeeMore = () => {
+    setIsLoadingMore(true);
+    setTimeout(() => {
+      setVisibleCount(prev => prev + PAGE_SIZE);
+      setIsLoadingMore(false);
+    }, 300);
+  };
+
+  const handleSeeLess = () => setVisibleCount(PAGE_SIZE);
 
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,7 +100,6 @@ export const SellerProducts: React.FC = () => {
       return;
     }
 
-    // Parse formatted price strings back to numbers
     const price = parsePriceInput(sellingPrice);
     if (isNaN(price) || price < 0) {
       setFormError('Please enter a valid selling price.');
@@ -93,7 +123,12 @@ export const SellerProducts: React.FC = () => {
           name,
           sku: sku.trim() || undefined,
           barcode: barcode.trim() || undefined,
-          categoryId: categoryId || firstActiveCat?.id || shopCategories[0]?.id || allCategories[0]?.id || 'cat-hardware',
+          categoryId:
+            categoryId ||
+            firstActiveCat?.id ||
+            shopCategories[0]?.id ||
+            allCategories[0]?.id ||
+            'cat-hardware',
           purchasePrice: costPrice,
           sellingPrice: price,
           currentStock: parseInt(currentStock, 10) || 0,
@@ -111,7 +146,6 @@ export const SellerProducts: React.FC = () => {
           description: `'${name}' has been added to catalog and saved locally.`,
         });
         setShowAddModal(false);
-        // Reset form
         setName('');
         setSku('');
         setBarcode('');
@@ -187,7 +221,11 @@ export const SellerProducts: React.FC = () => {
         </div>
 
         <div className="text-xs text-slate-400 font-medium">
-          Showing <span className="text-white font-bold">{products.length}</span> active items
+          Showing{' '}
+          <span className="text-white font-bold">
+            {Math.min(visibleCount, products.length)}
+          </span>{' '}
+          of <span className="text-white font-bold">{products.length}</span> active items
         </div>
       </div>
 
@@ -215,7 +253,7 @@ export const SellerProducts: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                products.map(product => {
+                visibleProducts.map(product => {
                   const cat = categories.find(c => c.id === product.categoryId);
                   const isLow = product.currentStock <= product.minStock;
 
@@ -277,6 +315,50 @@ export const SellerProducts: React.FC = () => {
             </tbody>
           </table>
         </div>
+
+        {/* See More / See Less Footer */}
+        {products.length > PAGE_SIZE && (
+          <div className="px-5 py-3 border-t border-slate-800/60 bg-slate-950/30 flex items-center justify-between gap-3">
+            <div className="text-[11px] text-slate-500">
+              Showing{' '}
+              <span className="text-slate-300 font-semibold">
+                {Math.min(visibleCount, products.length)}
+              </span>{' '}
+              of <span className="text-slate-300 font-semibold">{products.length}</span> products
+            </div>
+            <div className="flex items-center gap-2">
+              {visibleCount > PAGE_SIZE && (
+                <button
+                  onClick={handleSeeLess}
+                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition"
+                >
+                  Show Less
+                </button>
+              )}
+              {hasMore && (
+                <button
+                  onClick={handleSeeMore}
+                  disabled={isLoadingMore}
+                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-xs font-semibold shadow transition disabled:opacity-60 disabled:cursor-wait"
+                >
+                  {isLoadingMore ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Loading...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-3.5 h-3.5" />
+                      <span>
+                        See More ({Math.min(PAGE_SIZE, remaining)} of {remaining})
+                      </span>
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Modal: Seller Adds Product */}
@@ -391,7 +473,9 @@ export const SellerProducts: React.FC = () => {
                 </div>
 
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Proposed Selling Price *</label>
+                  <label className="block text-slate-300 font-medium mb-1">
+                    Proposed Selling Price *
+                  </label>
                   <input
                     type="text"
                     required
@@ -405,7 +489,9 @@ export const SellerProducts: React.FC = () => {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-300 font-medium mb-1">Initial Stock (Defaults to 0)</label>
+                  <label className="block text-slate-300 font-medium mb-1">
+                    Initial Stock (Defaults to 0)
+                  </label>
                   <input
                     type="number"
                     min="0"
@@ -427,12 +513,8 @@ export const SellerProducts: React.FC = () => {
                 </div>
               </div>
 
-              {/* Product Images (Optional - up to 3 images) */}
               <div className="pt-2 border-t border-slate-800/80">
-                <ProductImageUpload
-                  images={productImages}
-                  onChange={setProductImages}
-                />
+                <ProductImageUpload images={productImages} onChange={setProductImages} />
               </div>
 
               <div className="pt-3 border-t border-slate-800 flex justify-end gap-2">
@@ -456,7 +538,7 @@ export const SellerProducts: React.FC = () => {
         </div>
       )}
 
-      {/* Modal: Seller Permission Guard Notice for Editing */}
+      {/* Modal: Seller Permission Guard Notice */}
       {showEditDeniedModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl text-center">
@@ -465,7 +547,8 @@ export const SellerProducts: React.FC = () => {
             </div>
             <h3 className="text-base font-bold text-white mb-1">Admin Privilege Required</h3>
             <p className="text-xs text-slate-400 leading-relaxed mb-5">
-              Sellers can add new products and process sales, but only <strong>Administrators</strong> can modify prices, cost records, and existing product parameters to ensure financial audit integrity.
+              Sellers can add new products and process sales, but only <strong>Administrators</strong> can
+              modify prices, cost records, and existing product parameters to ensure financial audit integrity.
             </p>
             <button
               onClick={() => setShowEditDeniedModal(false)}
@@ -477,7 +560,6 @@ export const SellerProducts: React.FC = () => {
         </div>
       )}
 
-      {/* Product Image Gallery / Viewer Modal */}
       <ProductImageViewerModal
         product={viewingProduct}
         isOpen={isViewerOpen}
