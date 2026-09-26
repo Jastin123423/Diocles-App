@@ -53,12 +53,12 @@ export const AdminExpenses: React.FC = () => {
   const [deletingExpense, setDeletingExpense] = useState<Expense | null>(null);
   const [editingCategory, setEditingCategory] = useState<CustomCategory | null>(null);
   const [deletingCategory, setDeletingCategory] = useState<CustomCategory | null>(null);
-  
+
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
-  
-  // Period filter state
-  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('month');
+
+  // Period filter state — ✅ DEFAULT: TODAY
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('today');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
 
@@ -90,9 +90,15 @@ export const AdminExpenses: React.FC = () => {
 
   // Permission check
   if (!currentUser) return null;
-  if (currentUser.role !== 'ADMIN' && !currentUser.permissions?.canViewExpenses && !currentUser.permissions?.canRecordExpenses) return null;
+  if (
+    currentUser.role !== 'ADMIN' &&
+    !currentUser.permissions?.canViewExpenses &&
+    !currentUser.permissions?.canRecordExpenses
+  )
+    return null;
 
-  const canRecordExpense = currentUser.role === 'ADMIN' || currentUser.permissions?.canRecordExpenses;
+  const canRecordExpense =
+    currentUser.role === 'ADMIN' || currentUser.permissions?.canRecordExpenses;
   const isAdmin = currentUser.role === 'ADMIN';
 
   const settings = dbState.settings;
@@ -106,7 +112,7 @@ export const AdminExpenses: React.FC = () => {
   // Compute date range
   const dateRange = useMemo(() => {
     const now = new Date();
-    
+
     switch (periodFilter) {
       case 'today': {
         const d = now.toISOString().slice(0, 10);
@@ -114,15 +120,24 @@ export const AdminExpenses: React.FC = () => {
       }
       case 'week': {
         const past = new Date(now.getTime() - 7 * 86400000);
-        return { from: past.toISOString().slice(0, 10), to: now.toISOString().slice(0, 10) };
+        return {
+          from: past.toISOString().slice(0, 10),
+          to: now.toISOString().slice(0, 10),
+        };
       }
       case 'month': {
         const past = new Date(now.getFullYear(), now.getMonth(), 1);
-        return { from: past.toISOString().slice(0, 10), to: now.toISOString().slice(0, 10) };
+        return {
+          from: past.toISOString().slice(0, 10),
+          to: now.toISOString().slice(0, 10),
+        };
       }
       case 'year': {
         const past = new Date(now.getFullYear(), 0, 1);
-        return { from: past.toISOString().slice(0, 10), to: now.toISOString().slice(0, 10) };
+        return {
+          from: past.toISOString().slice(0, 10),
+          to: now.toISOString().slice(0, 10),
+        };
       }
       case 'custom': {
         return { from: customStartDate || undefined, to: customEndDate || undefined };
@@ -154,7 +169,7 @@ export const AdminExpenses: React.FC = () => {
     expenses.forEach(e => {
       categoryTotals[e.category] = (categoryTotals[e.category] || 0) + e.amount;
     });
-    
+
     let topCat = '';
     let topAmount = 0;
     Object.entries(categoryTotals).forEach(([cat, amt]) => {
@@ -163,7 +178,7 @@ export const AdminExpenses: React.FC = () => {
         topCat = cat;
       }
     });
-    
+
     if (topCat) {
       const found = allCategories.find(c => c.id === topCat);
       return found ? found.label : topCat;
@@ -217,7 +232,6 @@ export const AdminExpenses: React.FC = () => {
     }
 
     if (editingExpense) {
-      // UPDATE existing expense
       const res = ExpenseService.updateExpense(
         editingExpense.id,
         {
@@ -243,7 +257,6 @@ export const AdminExpenses: React.FC = () => {
         setFormError(res.error || 'Failed to update expense.');
       }
     } else {
-      // CREATE new expense
       const res = ExpenseService.createExpense(
         {
           title: title.trim(),
@@ -260,7 +273,10 @@ export const AdminExpenses: React.FC = () => {
         addToast({
           type: 'success',
           title: 'Expense Recorded',
-          description: `Expense of ${formatCurrency(amt, settings.currencySymbol)} logged under ${getCategoryLabel(category)}.`,
+          description: `Expense of ${formatCurrency(
+            amt,
+            settings.currencySymbol
+          )} logged under ${getCategoryLabel(category)}.`,
         });
         setIsModalOpen(false);
       } else {
@@ -293,7 +309,7 @@ export const AdminExpenses: React.FC = () => {
   // Category management functions
   const handleCreateCategory = () => {
     setCategoryError('');
-    
+
     if (!newCategoryName.trim()) {
       setCategoryError('Category name is required.');
       return;
@@ -302,10 +318,10 @@ export const AdminExpenses: React.FC = () => {
     const cleanName = newCategoryName.trim();
     const categoryId = `CUSTOM_${cleanName.toUpperCase().replace(/\s+/g, '_')}`;
 
-    // Check if already exists
     const exists = allCategories.some(
-      c => c.id.toLowerCase() === categoryId.toLowerCase() ||
-           c.label.toLowerCase() === cleanName.toLowerCase()
+      c =>
+        c.id.toLowerCase() === categoryId.toLowerCase() ||
+        c.label.toLowerCase() === cleanName.toLowerCase()
     );
 
     if (exists) {
@@ -337,7 +353,7 @@ export const AdminExpenses: React.FC = () => {
 
   const handleSaveEditedCategory = () => {
     if (!editingCategory) return;
-    
+
     if (!newCategoryName.trim()) {
       setCategoryError('Category name is required.');
       return;
@@ -345,9 +361,7 @@ export const AdminExpenses: React.FC = () => {
 
     const cleanName = newCategoryName.trim();
     const updatedCats = customCategories.map(c =>
-      c.id === editingCategory.id
-        ? { ...c, label: cleanName }
-        : c
+      c.id === editingCategory.id ? { ...c, label: cleanName } : c
     );
 
     saveCustomCategories(updatedCats);
@@ -366,8 +380,7 @@ export const AdminExpenses: React.FC = () => {
 
     const updatedCats = customCategories.filter(c => c.id !== deletingCategory.id);
     saveCustomCategories(updatedCats);
-    
-    // If currently filtering by this category, reset
+
     if (categoryFilter === deletingCategory.id) {
       setCategoryFilter('ALL');
     }
@@ -392,13 +405,20 @@ export const AdminExpenses: React.FC = () => {
 
   const getPeriodLabel = () => {
     switch (periodFilter) {
-      case 'today': return 'Today';
-      case 'week': return 'Last 7 Days';
-      case 'month': return 'This Month';
-      case 'year': return 'This Year';
-      case 'custom': return 'Custom Range';
-      case 'all': return 'All Time';
-      default: return 'This Month';
+      case 'today':
+        return 'Today';
+      case 'week':
+        return 'Last 7 Days';
+      case 'month':
+        return 'This Month';
+      case 'year':
+        return 'This Year';
+      case 'custom':
+        return 'Custom Range';
+      case 'all':
+        return 'All Time';
+      default:
+        return 'Today';
     }
   };
 
@@ -449,17 +469,19 @@ export const AdminExpenses: React.FC = () => {
           <div className="text-2xl font-bold text-rose-300 font-mono">
             {formatCurrency(totalSpent, settings.currencySymbol)}
           </div>
-          <p className="text-[11px] text-slate-400 mt-1">{expenses.length} expense transactions</p>
+          <p className="text-[11px] text-slate-400 mt-1">
+            {expenses.length} expense transactions
+          </p>
         </div>
 
         <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl">
           <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-xs font-semibold uppercase tracking-wider">Top Spend Category</span>
+            <span className="text-xs font-semibold uppercase tracking-wider">
+              Top Spend Category
+            </span>
             <PieChart className="w-4 h-4 text-blue-400" />
           </div>
-          <div className="text-lg font-bold text-white truncate">
-            {topCategory}
-          </div>
+          <div className="text-lg font-bold text-white truncate">{topCategory}</div>
           <p className="text-[11px] text-slate-400 mt-1">For selected period</p>
         </div>
 
@@ -468,9 +490,7 @@ export const AdminExpenses: React.FC = () => {
             <span className="text-xs font-semibold uppercase tracking-wider">Categories</span>
             <Tag className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="text-lg font-bold text-amber-300">
-            {allCategories.length}
-          </div>
+          <div className="text-lg font-bold text-amber-300">{allCategories.length}</div>
           <p className="text-[11px] text-slate-400 mt-1">
             {customCategories.length} custom + {DEFAULT_EXPENSE_CATEGORIES.length} default
           </p>
@@ -554,21 +574,25 @@ export const AdminExpenses: React.FC = () => {
           >
             <option value="ALL">All Categories ({allCategories.length})</option>
             {DEFAULT_EXPENSE_CATEGORIES.map(c => (
-              <option key={c.id} value={c.id}>{c.label}</option>
+              <option key={c.id} value={c.id}>
+                {c.label}
+              </option>
             ))}
             {customCategories.length > 0 && (
               <optgroup label="Custom Categories">
                 {customCategories.map(c => (
-                  <option key={c.id} value={c.id}>{c.label}</option>
+                  <option key={c.id} value={c.id}>
+                    {c.label}
+                  </option>
                 ))}
               </optgroup>
             )}
           </select>
 
-          {(periodFilter !== 'month' || searchQuery || categoryFilter !== 'ALL') && (
+          {(periodFilter !== 'today' || searchQuery || categoryFilter !== 'ALL') && (
             <button
               onClick={() => {
-                setPeriodFilter('month');
+                setPeriodFilter('today');
                 setSearchQuery('');
                 setCategoryFilter('ALL');
                 setCustomStartDate('');
@@ -614,7 +638,9 @@ export const AdminExpenses: React.FC = () => {
                     <td className="py-3.5 px-4 text-slate-400 font-mono">
                       {formatDateTime(expense.createdAt)}
                     </td>
-                    <td className="py-3.5 px-4 font-bold text-white">{expense.title || expense.description}</td>
+                    <td className="py-3.5 px-4 font-bold text-white">
+                      {expense.title || expense.description}
+                    </td>
                     <td className="py-3.5 px-4 text-slate-300">
                       <span className="px-2 py-0.5 rounded-full bg-slate-800 text-[10px] font-medium border border-slate-700/60">
                         {getCategoryLabel(expense.category)}
@@ -688,7 +714,9 @@ export const AdminExpenses: React.FC = () => {
 
             <form onSubmit={handleSaveExpense} className="space-y-4 text-xs">
               <div>
-                <label className="block text-slate-300 font-medium mb-1">Expense Description *</label>
+                <label className="block text-slate-300 font-medium mb-1">
+                  Expense Description *
+                </label>
                 <input
                   type="text"
                   required
@@ -708,12 +736,16 @@ export const AdminExpenses: React.FC = () => {
                     className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
                   >
                     {DEFAULT_EXPENSE_CATEGORIES.map(c => (
-                      <option key={c.id} value={c.id}>{c.label}</option>
+                      <option key={c.id} value={c.id}>
+                        {c.label}
+                      </option>
                     ))}
                     {customCategories.length > 0 && (
                       <optgroup label="Custom Categories">
                         {customCategories.map(c => (
-                          <option key={c.id} value={c.id}>{c.label}</option>
+                          <option key={c.id} value={c.id}>
+                            {c.label}
+                          </option>
                         ))}
                       </optgroup>
                     )}
@@ -817,7 +849,6 @@ export const AdminExpenses: React.FC = () => {
               </button>
             </div>
 
-            {/* Add / Edit Category Form */}
             <div className="mb-4 p-3 rounded-lg bg-slate-950 border border-slate-800">
               <label className="block text-slate-300 font-medium mb-1.5 text-xs">
                 {editingCategory ? 'Edit Category Name' : 'Create New Category'}
@@ -864,7 +895,6 @@ export const AdminExpenses: React.FC = () => {
               )}
             </div>
 
-            {/* Custom Categories List */}
             <div className="space-y-2">
               <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
                 Custom Categories ({customCategories.length})
@@ -905,7 +935,6 @@ export const AdminExpenses: React.FC = () => {
               )}
             </div>
 
-            {/* Default Categories (read-only) */}
             <div className="mt-5 space-y-2">
               <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">
                 Default Categories ({DEFAULT_EXPENSE_CATEGORIES.length}) — Read Only
@@ -938,7 +967,10 @@ export const AdminExpenses: React.FC = () => {
             </div>
             <p className="text-xs text-slate-400 mb-4">
               Delete expense <strong className="text-white">"{deletingExpense.title}"</strong> of{' '}
-              <strong className="text-white">{formatCurrency(deletingExpense.amount, settings.currencySymbol)}</strong>?
+              <strong className="text-white">
+                {formatCurrency(deletingExpense.amount, settings.currencySymbol)}
+              </strong>
+              ?
             </p>
             <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
               <button
@@ -967,7 +999,8 @@ export const AdminExpenses: React.FC = () => {
               <h3 className="text-base font-bold text-white">Delete Category?</h3>
             </div>
             <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-200 text-xs mb-4">
-              <strong>Warning:</strong> This only removes the category option. Existing expenses will keep their category label.
+              <strong>Warning:</strong> This only removes the category option. Existing expenses will
+              keep their category label.
             </div>
             <p className="text-xs text-slate-400 mb-4">
               Delete category <strong className="text-white">"{deletingCategory.label}"</strong>?
