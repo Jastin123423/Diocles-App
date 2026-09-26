@@ -39,6 +39,7 @@ interface DeviationRow {
   diff: number;
   totalImpact: number;
   direction: 'ABOVE' | 'BELOW';
+  usedSnapshot: boolean;   // 🆕 true = snapshot from sale time; false = fell back to current product price
 }
 
 type DeviationDirection = 'ALL' | 'ABOVE' | 'BELOW';
@@ -299,6 +300,9 @@ export const AdminReports: React.FC = () => {
 
   // ─────────────────────────────────────────────────────────────
   // Deviations computed from deviationRange
+  //   🔒 Prefers the immutable snapshot stored on the sale item.
+  //      Falls back to current product price for legacy sales
+  //      recorded before the snapshot existed.
   // ─────────────────────────────────────────────────────────────
   const allDeviations = useMemo<DeviationRow[]>(() => {
     const sales = deviationSummary.filteredSales || [];
@@ -312,10 +316,17 @@ export const AdminReports: React.FC = () => {
         const product = productMap.get(item.productId);
         if (!product) continue;
 
-        const referencePrice =
-          product.proposedSellingPrice && product.proposedSellingPrice > 0
-            ? product.proposedSellingPrice
-            : product.sellingPrice || 0;
+        // 🔒 Prefer the sale-time snapshot
+        const hasSnapshot =
+          item.referencePrice !== undefined &&
+          item.referencePrice !== null &&
+          item.referencePrice > 0;
+
+        const referencePrice = hasSnapshot
+          ? (item.referencePrice as number)
+          : (product.proposedSellingPrice && product.proposedSellingPrice > 0
+              ? product.proposedSellingPrice
+              : product.sellingPrice || 0);
 
         if (referencePrice <= 0) continue;
 
@@ -343,6 +354,7 @@ export const AdminReports: React.FC = () => {
           diff,
           totalImpact,
           direction: diff > 0 ? 'ABOVE' : 'BELOW',
+          usedSnapshot: hasSnapshot,
         });
       }
     }
@@ -523,6 +535,7 @@ export const AdminReports: React.FC = () => {
           .amount { text-align: right; font-family: 'Courier New', monospace; font-weight: bold; }
           .diff-below { color: #dc2626; text-align: right; font-weight: bold; }
           .diff-above { color: #16a34a; text-align: right; font-weight: bold; }
+          .est { color: #94a3b8; font-size: 9px; font-weight: normal; margin-left: 4px; }
         </style>
       </head>
       <body>
@@ -566,7 +579,7 @@ export const AdminReports: React.FC = () => {
                 <td>${d.sellerName}</td>
                 <td>${d.productName}</td>
                 <td style="font-family:monospace;">${d.sku}</td>
-                <td class="amount">${settings.currencySymbol} ${d.referencePrice.toLocaleString()}</td>
+                <td class="amount">${settings.currencySymbol} ${d.referencePrice.toLocaleString()}${!d.usedSnapshot ? '<span class="est">est.</span>' : ''}</td>
                 <td class="amount">${settings.currencySymbol} ${d.soldPrice.toLocaleString()}</td>
                 <td class="${d.direction === 'BELOW' ? 'diff-below' : 'diff-above'}">${d.diff > 0 ? '+' : ''}${settings.currencySymbol} ${d.diff.toLocaleString()}</td>
                 <td class="amount">${d.quantity}</td>
@@ -629,7 +642,7 @@ export const AdminReports: React.FC = () => {
     addToast({ type: 'success', title: 'Report Exported', description: 'CSV report downloaded successfully.' });
   };
 
-  // Export Deviations CSV
+  // Export Deviations CSV — includes the "Snapshot?" column
   const handleExportDeviationsCSV = () => {
     if (deviations.length === 0) {
       addToast({ type: 'info', title: 'No Deviations', description: 'There are no price deviations in the current filter.' });
@@ -644,9 +657,9 @@ export const AdminReports: React.FC = () => {
     csv += `Extra Gained,${deviationStats.aboveImpact}\n`;
     csv += `Discount Value,${deviationStats.belowImpact}\n`;
     csv += `Net Impact,${deviationStats.netImpact}\n\n`;
-    csv += `Date,Receipt #,Shop,Seller,Product,SKU,Reference,Sold At,Diff,Qty,Impact,Direction\n`;
+    csv += `Date,Receipt #,Shop,Seller,Product,SKU,Reference,Sold At,Diff,Qty,Impact,Direction,Reference Source\n`;
     deviations.forEach(d => {
-      csv += `"${formatDateTime(d.createdAt)}","${d.receiptNumber}","${d.shopName}","${d.sellerName}","${d.productName}","${d.sku}",${d.referencePrice},${d.soldPrice},${d.diff},${d.quantity},${d.totalImpact},${d.direction}\n`;
+      csv += `"${formatDateTime(d.createdAt)}","${d.receiptNumber}","${d.shopName}","${d.sellerName}","${d.productName}","${d.sku}",${d.referencePrice},${d.soldPrice},${d.diff},${d.quantity},${d.totalImpact},${d.direction},"${d.usedSnapshot ? 'Sale-time snapshot' : 'Current product price (legacy)'}"\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -952,6 +965,15 @@ export const AdminReports: React.FC = () => {
                             </td>
                             <td className="py-2.5 px-3 text-right font-mono text-slate-300">
                               {formatCurrency(d.referencePrice, settings.currencySymbol)}
+                              {/* Small badge for legacy rows that used the current product price */}
+                              {!d.usedSnapshot && (
+                                <span
+                                  className="ml-1 text-[9px] text-slate-500"
+                                  title="Compared against current product price (legacy sale — no snapshot recorded)"
+                                >
+                                  est.
+                                </span>
+                              )}
                             </td>
                             <td className="py-2.5 px-3 text-right font-mono font-bold text-white">
                               {formatCurrency(d.soldPrice, settings.currencySymbol)}
