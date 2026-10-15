@@ -29,9 +29,29 @@ const PAGE_SIZE = 15;
 interface CartItem {
   product: Product;
   quantity: number | string;
-  unitPrice: number | string;   // 🔧 FIX: allow blank string mid-edit
+  unitPrice: number | string;   // allow blank string mid-edit
   discount: number;
 }
+
+// ─────────────────────────────────────────────────────────────
+// Unit helpers — detect if a product is sold by decimal measure
+// (kg, g, liter, ml, meter) vs. discrete pieces.
+// ─────────────────────────────────────────────────────────────
+const DECIMAL_UNIT_REGEX = /(kg|kilogram|g\b|gram|liter|litre|^l$|\bl\b|ml|milliliter|millilitre|meter|metre|^m$|\bm\b|oz|lb)/i;
+
+const isDecimalUnit = (unit?: string): boolean => {
+  if (!unit) return false;
+  return DECIMAL_UNIT_REGEX.test(unit.trim());
+};
+
+// Smallest allowed quantity for a given unit
+const minQtyForUnit = (unit?: string): number => (isDecimalUnit(unit) ? 0.01 : 1);
+
+// Step size for +/- buttons
+const stepSizeForUnit = (unit?: string): number => (isDecimalUnit(unit) ? 0.25 : 1);
+
+// Round to 3 decimals to avoid float noise like 0.30000000000000004
+const round3 = (n: number): number => Number(n.toFixed(3));
 
 export const NewSalePOS: React.FC = () => {
   const { currentUser, dbState, addToast, showReceipt, sellerColor, selectedShopId, currentShop } = useApp();
@@ -64,8 +84,6 @@ export const NewSalePOS: React.FC = () => {
 
   // ─────────────────────────────────────────────────────────────
   // MOST-SELLING RANK MAP
-  // Count how many units of each product have been sold across all
-  // historical sales for the current shop. Returns a Map<productId, unitsSold>.
   // ─────────────────────────────────────────────────────────────
   const salesCountMap = useMemo(() => {
     const map = new Map<string, number>();
@@ -92,8 +110,6 @@ export const NewSalePOS: React.FC = () => {
 
   // ─────────────────────────────────────────────────────────────
   // FILTER + SORT
-  // 1. Filter by category and search (UNCHANGED)
-  // 2. Sort: most-sold first, then by stock ascending, then by name
   // ─────────────────────────────────────────────────────────────
   const filteredProducts = useMemo(() => {
     const filtered = products.filter(p => {
@@ -107,20 +123,15 @@ export const NewSalePOS: React.FC = () => {
       return matchesCategory && matchesSearch;
     });
 
-    // Most-selling first → tie-break by stock → then name
     return [...filtered].sort((a, b) => {
       const aSales = salesCountMap.get(a.id) || 0;
       const bSales = salesCountMap.get(b.id) || 0;
       if (bSales !== aSales) return bSales - aSales;
-
-      // Tie-break: products in stock come first, higher stock first
       if (b.currentStock !== a.currentStock) return b.currentStock - a.currentStock;
-
       return a.name.localeCompare(b.name);
     });
   }, [products, selectedCategory, searchQuery, salesCountMap]);
 
-  // Reset pagination when search/category changes
   useEffect(() => {
     setVisibleCount(PAGE_SIZE);
   }, [searchQuery, selectedCategory]);
@@ -142,11 +153,11 @@ export const NewSalePOS: React.FC = () => {
   };
 
   // ─────────────────────────────────────────────────────────────
-  // Numeric coercion helpers
+  // Numeric coercion helpers — DECIMAL-AWARE
   // ─────────────────────────────────────────────────────────────
   const qtyNum = (q: number | string): number => {
     if (typeof q === 'number') return Number.isFinite(q) ? q : 0;
-    const parsed = parseInt(q, 10);
+    const parsed = parseFloat(q);
     return Number.isFinite(parsed) ? parsed : 0;
   };
 
@@ -177,6 +188,9 @@ export const NewSalePOS: React.FC = () => {
     }
   }, [totalAmount, paymentMethod]);
 
+  // ─────────────────────────────────────────────────────────────
+  // Cart operations
+  // ─────────────────────────────────────────────────────────────
   const addToCart = (product: Product) => {
     if (product.currentStock <= 0) {
       addToast({
@@ -189,9 +203,12 @@ export const NewSalePOS: React.FC = () => {
 
     setCart(prev => {
       const existing = prev.find(item => item.product.id === product.id);
+      const step = stepSizeForUnit(product.unit);
+
       if (existing) {
         const currentQty = qtyNum(existing.quantity);
-        if (currentQty >= product.currentStock) {
+        const nextQty = round3(currentQty + step);
+        if (nextQty > product.currentStock) {
           addToast({
             type: 'warning',
             title: 'Stock Limit Reached',
@@ -201,15 +218,19 @@ export const NewSalePOS: React.FC = () => {
         }
         return prev.map(item =>
           item.product.id === product.id
-            ? { ...item, quantity: currentQty + 1 }
+            ? { ...item, quantity: nextQty }
             : item
         );
       }
+
+      // Seed new line with 0.25 for decimal units, 1 for pieces
+      const initialQty = isDecimalUnit(product.unit) ? 0.25 : 1;
+
       return [
         ...prev,
         {
           product,
-          quantity: 1,
+          quantity: initialQty,
           unitPrice: product.sellingPrice,
           discount: 0,
         },
@@ -251,10 +272,14 @@ export const NewSalePOS: React.FC = () => {
     );
   };
 
+  // ─────────────────────────────────────────────────────────────
+  // Quantity handling — DECIMAL-AWARE
+  // ─────────────────────────────────────────────────────────────
   const updateQuantity = (productId: string, rawValue: string) => {
     const item = cart.find(i => i.product.id === productId);
     if (!item) return;
 
+    // Allow blank while editing
     if (rawValue === '') {
       setCart(prev =>
         prev.map(i => (i.product.id === productId ? { ...i, quantity: '' } : i))
@@ -262,23 +287,50 @@ export const NewSalePOS: React.FC = () => {
       return;
     }
 
-    const parsed = parseInt(rawValue, 10);
-    if (!Number.isFinite(parsed)) return;
+    // Allow partial decimal input like "1." or "0." — keep as string mid-edit
+    if (rawValue === '.' || rawValue.endsWith('.')) {
+      if (/^\d*\.?\d*$/.test(rawValue)) {
+        setCart(prev =>
+          prev.map(i => (i.product.id === productId ? { ...i, quantity: rawValue } : i))
+        );
+      }
+      return;
+    }
 
+    // Reject anything that isn't a valid positive number pattern
+    if (!/^\d*\.?\d*$/.test(rawValue)) return;
+
+    const parsed = parseFloat(rawValue);
+    if (!Number.isFinite(parsed)) {
+      // Store raw string so user can continue typing
+      setCart(prev =>
+        prev.map(i => (i.product.id === productId ? { ...i, quantity: rawValue } : i))
+      );
+      return;
+    }
+
+    const minQty = minQtyForUnit(item.product.unit);
     let nextQty = parsed;
-    if (nextQty < 1) nextQty = 1;
+
+    if (nextQty < minQty) {
+      // Keep raw string if user is mid-typing (e.g. "0" before ".25")
+      setCart(prev =>
+        prev.map(i => (i.product.id === productId ? { ...i, quantity: rawValue } : i))
+      );
+      return;
+    }
 
     if (nextQty > item.product.currentStock) {
       addToast({
         type: 'warning',
         title: 'Stock Exceeded',
-        description: `Max stock for this item is ${item.product.currentStock}.`,
+        description: `Max stock for this item is ${item.product.currentStock} ${item.product.unit}.`,
       });
       nextQty = item.product.currentStock;
     }
 
     setCart(prev =>
-      prev.map(i => (i.product.id === productId ? { ...i, quantity: nextQty } : i))
+      prev.map(i => (i.product.id === productId ? { ...i, quantity: rawValue } : i))
     );
   };
 
@@ -286,8 +338,10 @@ export const NewSalePOS: React.FC = () => {
     setCart(prev =>
       prev.map(i => {
         if (i.product.id !== productId) return i;
+        const minQty = minQtyForUnit(i.product.unit);
         const n = qtyNum(i.quantity);
-        return { ...i, quantity: n < 1 ? 1 : n };
+        const safe = n < minQty ? minQty : n;
+        return { ...i, quantity: round3(safe) };
       })
     );
   };
@@ -295,8 +349,13 @@ export const NewSalePOS: React.FC = () => {
   const stepQuantity = (productId: string, delta: number) => {
     const item = cart.find(i => i.product.id === productId);
     if (!item) return;
-    const current = qtyNum(item.quantity) || 1;
-    updateQuantity(productId, String(current + delta));
+
+    const step = stepSizeForUnit(item.product.unit);
+    const minQty = minQtyForUnit(item.product.unit);
+    const current = qtyNum(item.quantity) || minQty;
+    const next = Math.max(minQty, round3(current + delta * step));
+
+    updateQuantity(productId, String(next));
   };
 
   const removeFromCart = (productId: string) => {
@@ -337,6 +396,9 @@ export const NewSalePOS: React.FC = () => {
     }
   };
 
+  // ─────────────────────────────────────────────────────────────
+  // Complete Sale — DECIMAL-AWARE validation
+  // ─────────────────────────────────────────────────────────────
   const handleCompleteSale = () => {
     if (!currentUser) return;
 
@@ -349,12 +411,16 @@ export const NewSalePOS: React.FC = () => {
       return;
     }
 
-    const invalid = cart.find(i => qtyNum(i.quantity) < 1);
+    // Validate quantity against unit-specific minimum
+    const invalid = cart.find(i => {
+      const q = qtyNum(i.quantity);
+      return q < minQtyForUnit(i.product.unit);
+    });
     if (invalid) {
       addToast({
         type: 'error',
         title: 'Invalid Quantity',
-        description: `Please set a quantity of at least 1 for ${invalid.product.name}.`,
+        description: `Please set a valid quantity for ${invalid.product.name} (min ${minQtyForUnit(invalid.product.unit)} ${invalid.product.unit}).`,
       });
       return;
     }
@@ -417,6 +483,16 @@ export const NewSalePOS: React.FC = () => {
       });
     }
   };
+
+  // Total number of items in cart (sum, formatted to 2 decimals if any decimal units)
+  const cartItemCountLabel = useMemo(() => {
+    const totalQty = cart.reduce((s, i) => s + qtyNum(i.quantity), 0);
+    const hasDecimal = cart.some(i => isDecimalUnit(i.product.unit));
+    if (hasDecimal) {
+      return Number(totalQty.toFixed(2)).toString();
+    }
+    return totalQty.toString();
+  }, [cart]);
 
   return (
     <div id="pos-terminal" className="flex-1 flex overflow-hidden bg-slate-950 text-slate-100 select-none">
@@ -533,7 +609,7 @@ export const NewSalePOS: React.FC = () => {
                                 className="text-[9px] px-1 py-0.2 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 font-bold shrink-0"
                                 title={`${unitsSold} units sold historically`}
                               >
-                                🔥 {unitsSold}
+                                🔥 {Number(unitsSold.toFixed(2))}
                               </span>
                             )}
                           </div>
@@ -576,6 +652,9 @@ export const NewSalePOS: React.FC = () => {
                       <div className="flex items-center justify-between mt-2 pt-2 border-t border-slate-800/60">
                         <span className="text-xs font-bold text-emerald-400 font-mono">
                           {formatCurrency(product.sellingPrice, settings.currencySymbol)}
+                          {isDecimalUnit(product.unit) && (
+                            <span className="text-[9px] text-slate-500 font-normal"> /{product.unit}</span>
+                          )}
                         </span>
                         <button
                           type="button"
@@ -651,7 +730,7 @@ export const NewSalePOS: React.FC = () => {
           <div className="flex items-center gap-2">
             <ShoppingCart className="w-4 h-4 text-blue-400" />
             <h3 className="text-xs font-bold text-white uppercase tracking-wider">
-              Active Sale Cart ({cart.reduce((s, i) => s + qtyNum(i.quantity), 0)} Items)
+              Active Sale Cart ({cartItemCountLabel} Items)
             </h3>
           </div>
           {cart.length > 0 && (
@@ -683,6 +762,7 @@ export const NewSalePOS: React.FC = () => {
               const unitPriceNum = priceNum(item.unitPrice);
               const isBelowReference =
                 referencePrice > 0 && unitPriceNum > 0 && unitPriceNum < referencePrice;
+              const decimalUnit = isDecimalUnit(item.product.unit);
 
               return (
                 <div
@@ -754,13 +834,12 @@ export const NewSalePOS: React.FC = () => {
                         </button>
                         <input
                           type="text"
-                          inputMode="numeric"
-                          pattern="[0-9]*"
+                          inputMode="decimal"
                           value={item.quantity}
                           onChange={e => updateQuantity(item.product.id, e.target.value)}
                           onBlur={() => handleQuantityBlur(item.product.id)}
                           onFocus={e => e.target.select()}
-                          className="w-10 bg-slate-950 border border-slate-700 rounded text-center text-xs font-bold text-white font-mono py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                          className="w-14 bg-slate-950 border border-slate-700 rounded text-center text-xs font-bold text-white font-mono py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-500"
                         />
                         <button
                           type="button"
@@ -770,8 +849,17 @@ export const NewSalePOS: React.FC = () => {
                           <Plus className="w-3 h-3" />
                         </button>
                       </div>
+                      <span className="text-[10px] text-slate-500 font-mono min-w-[24px]">
+                        {item.product.unit}
+                      </span>
                     </div>
                   </div>
+
+                  {decimalUnit && (
+                    <div className="text-[10px] text-slate-500 italic">
+                      Selling by measure — enter decimal quantity (e.g., 0.25, 1.5)
+                    </div>
+                  )}
 
                   {isBelowReference && (
                     <div className="flex items-center gap-1.5 text-[10px] font-semibold text-rose-400 bg-rose-500/10 px-2 py-1 rounded border border-rose-500/25 mt-1">
@@ -790,8 +878,7 @@ export const NewSalePOS: React.FC = () => {
           {/* Payment Method Selector */}
           <div>
             <span className="block text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
-              Payment Method
-            </span>
+              Payment Method            </span>
             <div className="grid grid-cols-4 gap-1">
               {[
                 { id: 'CASH', label: 'Cash', icon: DollarSign },
