@@ -26,7 +26,7 @@ export const LoginView: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [statusMsg, setStatusMsg] = useState('');
-  // Manual toggle for password visibility (used on Admin portal)
+  // Password visibility toggle (masked by default on BOTH portals for security)
   const [showPassword, setShowPassword] = useState(false);
 
   const settings = dbState.settings;
@@ -137,9 +137,12 @@ export const LoginView: React.FC = () => {
     }
   };
 
-  // Password is visible when SELLER portal is active.
-  // Masked when ADMIN portal is active (unless admin manually toggles it).
-  const passwordIsVisible = activePortal === 'SELLER' || showPassword;
+  // Reset password visibility whenever the portal is switched
+  const switchPortal = (role: UserRole) => {
+    setActivePortal(role);
+    setErrorMsg('');
+    setShowPassword(false);
+  };
 
   return (
     <div
@@ -182,11 +185,7 @@ export const LoginView: React.FC = () => {
               <button
                 type="button"
                 id="portal-seller-btn"
-                onClick={() => {
-                  setActivePortal('SELLER');
-                  setErrorMsg('');
-                  setShowPassword(false);
-                }}
+                onClick={() => switchPortal('SELLER')}
                 className={`flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-semibold transition-all ${
                   activePortal === 'SELLER'
                     ? 'bg-blue-600 text-white shadow-md'
@@ -200,11 +199,7 @@ export const LoginView: React.FC = () => {
               <button
                 type="button"
                 id="portal-admin-btn"
-                onClick={() => {
-                  setActivePortal('ADMIN');
-                  setErrorMsg('');
-                  setShowPassword(false);
-                }}
+                onClick={() => switchPortal('ADMIN')}
                 className={`flex items-center justify-center gap-2 py-2.5 rounded-lg text-xs font-semibold transition-all ${
                   activePortal === 'ADMIN'
                     ? 'bg-slate-800 text-amber-300 border border-amber-500/40 shadow-md'
@@ -263,7 +258,7 @@ export const LoginView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Password */}
+              {/* Password — masked by default on BOTH portals for security */}
               <div>
                 <label className="block text-xs font-medium text-slate-300 mb-1.5">
                   Password
@@ -273,7 +268,7 @@ export const LoginView: React.FC = () => {
                     <KeyRound className="w-4 h-4" />
                   </div>
 
-                  {/* Always type="text" for friendly mobile keyboard.
+                  {/* Always type="text" so mobile keyboards behave predictably.
                       When hidden, characters are masked with -webkit-text-security. */}
                   <input
                     id="login-password-input"
@@ -288,40 +283,34 @@ export const LoginView: React.FC = () => {
                     inputMode="text"
                     enterKeyHint="done"
                     style={
-                      passwordIsVisible
+                      showPassword
                         ? undefined
                         : ({ WebkitTextSecurity: 'disc' } as React.CSSProperties)
                     }
-                    className={`w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 ${
-                      activePortal === 'ADMIN' ? 'pr-10' : 'pr-3'
-                    } py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition`}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-10 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition"
                   />
 
-                  {/* Eye toggle only on ADMIN portal */}
-                  {activePortal === 'ADMIN' && (
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(v => !v)}
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300 transition"
-                      aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      tabIndex={-1}
-                    >
-                      {showPassword ? (
-                        <EyeOff className="w-4 h-4" />
-                      ) : (
-                        <Eye className="w-4 h-4" />
-                      )}
-                    </button>
-                  )}
+                  {/* Eye toggle — available on both Seller and Admin portals */}
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(v => !v)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300 transition"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                    tabIndex={-1}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="w-4 h-4" />
+                    ) : (
+                      <Eye className="w-4 h-4" />
+                    )}
+                  </button>
                 </div>
 
-                {/* Friendly hint on Seller portal */}
-                {activePortal === 'SELLER' && (
-                  <p className="text-[10px] text-slate-500 mt-1.5 flex items-center gap-1">
-                    <Eye className="w-3 h-3" />
-                    Your password is visible so you can type it correctly.
-                  </p>
-                )}
+                {/* Security hint (subtle, reassuring) */}
+                <p className="text-[10px] text-slate-500 mt-1.5 flex items-center gap-1">
+                  <Lock className="w-3 h-3" />
+                  Password is hidden for your security. Click the eye icon to reveal it.
+                </p>
               </div>
 
               {/* Remember Me Checkbox */}
