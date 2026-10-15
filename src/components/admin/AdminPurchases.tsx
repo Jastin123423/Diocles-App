@@ -15,6 +15,7 @@ import {
   Check,
   ChevronDown,
   Loader2,
+  ArrowLeft,
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { PurchaseService } from '../../services/purchaseService';
@@ -22,6 +23,9 @@ import { formatCurrency, formatDateTime } from '../../utils/formatters';
 import type { Purchase } from '../../types';
 
 const PAGE_SIZE = 15;
+
+// Minimum number of products shown in the dropdown before any search
+const MIN_PRODUCTS_SHOWN = 6;
 
 interface PurchaseItemInput {
   productId: string;
@@ -31,6 +35,8 @@ interface PurchaseItemInput {
 
 // ─────────────────────────────────────────────────────────────
 // Inline ProductSearchSelect — used per line-item row
+// Search box stays pinned at top; results list scrolls below.
+// Always shows at least MIN_PRODUCTS_SHOWN products by default.
 // ─────────────────────────────────────────────────────────────
 interface ProductLike {
   id: string;
@@ -61,9 +67,15 @@ const ProductSearchSelect: React.FC<{
     [products, value]
   );
 
+  // Filtered results: when no query, show at least MIN_PRODUCTS_SHOWN products
+  // (or everything, capped at 100). When there is a query, apply token match.
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return products.slice(0, 50);
+    if (!q) {
+      // Always show at least MIN_PRODUCTS_SHOWN (up to 100) so the user can browse
+      const min = Math.max(MIN_PRODUCTS_SHOWN, MIN_PRODUCTS_SHOWN);
+      return products.slice(0, Math.max(min, Math.min(products.length, 100)));
+    }
     const tokens = q.split(/\s+/);
     return products
       .filter(p => {
@@ -147,9 +159,10 @@ const ProductSearchSelect: React.FC<{
 
       {isOpen && (
         <div
-          className="absolute z-50 mt-1 left-0 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl w-[440px] max-w-[calc(100vw-4rem)] max-h-80 flex flex-col animate-in fade-in slide-in-from-top-1"
+          className="absolute z-50 mt-1 left-0 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl w-[440px] max-w-[calc(100vw-4rem)] flex flex-col animate-in fade-in slide-in-from-top-1"
         >
-          <div className="p-2.5 border-b border-slate-800">
+          {/* Pinned search header — always visible, never overlaps the list */}
+          <div className="p-2.5 border-b border-slate-800 shrink-0">
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2" />
               <input
@@ -173,12 +186,17 @@ const ProductSearchSelect: React.FC<{
             </div>
             <p className="text-[10px] text-slate-500 mt-1.5">
               {query
-                ? `${filtered.length} match${filtered.length === 1 ? '' : 'es'}`
+                ? `${filtered.length} match${filtered.length === 1 ? '' : 'es'} — scroll to see more`
                 : `Showing first ${filtered.length} of ${products.length} — type to search`}
             </p>
           </div>
 
-          <div ref={listRef} className="overflow-y-auto flex-1">
+          {/* Scrollable results — fixed height so at least MIN_PRODUCTS_SHOWN visible */}
+          <div
+            ref={listRef}
+            className="overflow-y-auto"
+            style={{ maxHeight: '320px' }}
+          >
             {filtered.length === 0 ? (
               <div className="p-6 text-center">
                 <Package className="w-7 h-7 mx-auto text-slate-600 mb-2" />
@@ -223,7 +241,8 @@ const ProductSearchSelect: React.FC<{
             )}
           </div>
 
-          <div className="flex items-center justify-between px-3 py-1.5 border-t border-slate-800 bg-slate-950/60 text-[10px] text-slate-500">
+          {/* Footer hint */}
+          <div className="flex items-center justify-between px-3 py-1.5 border-t border-slate-800 bg-slate-950/60 text-[10px] text-slate-500 shrink-0">
             <span>↑↓ navigate • Enter select • Esc close</span>
             <span>{products.length} products</span>
           </div>
@@ -511,6 +530,317 @@ export const AdminPurchases: React.FC = () => {
     }
   };
 
+  // ─────────────────────────────────────────────────────────────
+  // FULL-SCREEN Record Stock In / Purchase Page
+  // Renders in place of the list view when isModalOpen is true.
+  // ─────────────────────────────────────────────────────────────
+  if (isModalOpen && canRecordPurchase) {
+    return (
+      <div className="flex-1 flex flex-col bg-slate-950 text-slate-100 overflow-hidden">
+        {/* Full-screen header bar */}
+        <div className="px-6 py-4 bg-slate-900 border-b border-slate-800 flex items-center justify-between gap-4 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={() => {
+                setIsModalOpen(false);
+                setEditingPurchase(null);
+                setIsEditMode(false);
+              }}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition shrink-0"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back</span>
+            </button>
+
+            <div className="flex items-center gap-2 min-w-0">
+              {isEditMode ? (
+                <Pencil className="w-5 h-5 text-amber-400 shrink-0" />
+              ) : (
+                <Truck className="w-5 h-5 text-blue-400 shrink-0" />
+              )}
+              <div className="min-w-0">
+                <h2 className="text-base font-bold text-white truncate">
+                  {editingPurchase
+                    ? 'Edit Purchase / Correct Quantity'
+                    : 'Record Stock In / Purchase'}
+                </h2>
+                <p className="text-[11px] text-slate-400 truncate">
+                  {isEditMode
+                    ? 'Update line items — stock is automatically recalculated'
+                    : 'Log a supplier delivery and restock inventory automatically'}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <div className="hidden md:block text-right mr-2">
+              <div className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
+                Total Purchase Cost
+              </div>
+              <div className="text-lg font-extrabold font-mono text-emerald-400">
+                {formatCurrency(calculatedTotal, settings.currencySymbol)}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIsModalOpen(false);
+                setEditingPurchase(null);
+                setIsEditMode(false);
+              }}
+              className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800 transition"
+              title="Close"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Scrollable form body */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="max-w-5xl mx-auto px-6 py-6">
+            {formError && (
+              <div className="mb-5 p-3.5 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{formError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleSavePurchase} className="space-y-6 text-xs">
+              {/* Section: Purchase details */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+                <h3 className="text-[11px] uppercase tracking-wider text-slate-400 font-bold mb-4">
+                  Purchase Details
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {!isEditMode && (
+                    <div className="md:col-span-2">
+                      <label className="block text-slate-300 font-medium mb-1.5">
+                        Target Shop / Unit *
+                      </label>
+                      <select
+                        value={purchaseShopId}
+                        onChange={e => setPurchaseShopId(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      >
+                        {availableShops.map(s => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} ({s.code || 'UNIT'})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1.5">
+                      Supplier / Vendor Name (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={supplierName}
+                      onChange={e => setSupplierName(e.target.value)}
+                      placeholder="e.g. Apex Hardware Distro"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1.5">
+                      Vendor Invoice # (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={invoiceNumber}
+                      onChange={e => setInvoiceNumber(e.target.value)}
+                      placeholder="e.g. INV-98442"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-white font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Section: Line items */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-[11px] uppercase tracking-wider text-slate-400 font-bold">
+                    {isEditMode ? 'Correct Item Quantities / Costs' : 'Received Inventory Items'}
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={addItemRow}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 font-semibold text-[11px] transition"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Item</span>
+                  </button>
+                </div>
+
+                {isEditMode && (
+                  <div className="mb-3 p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] flex items-start gap-2">
+                    <AlertCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                    <span>
+                      Changing quantities will recalculate stock. The system will reverse old
+                      quantities and apply new ones.
+                    </span>
+                  </div>
+                )}
+
+                {/* Column headers for clarity */}
+                <div className="hidden md:grid grid-cols-[1fr_100px_130px_120px_40px] gap-2 px-2.5 pb-2 text-[10px] uppercase tracking-wider text-slate-500 font-semibold border-b border-slate-800 mb-2">
+                  <div>Product</div>
+                  <div className="text-center">Quantity</div>
+                  <div className="text-center">Unit Cost</div>
+                  <div className="text-right">Line Total</div>
+                  <div></div>
+                </div>
+
+                <div className="space-y-2">
+                  {items.map((item, idx) => (
+                    <div
+                      key={idx}
+                      className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 grid grid-cols-1 md:grid-cols-[1fr_100px_130px_120px_40px] gap-2 items-center"
+                    >
+                      <div className="min-w-0">
+                        <ProductSearchSelect
+                          products={shopProducts.length > 0 ? shopProducts : dbState.products}
+                          value={item.productId}
+                          onChange={productId => updateItemRow(idx, 'productId', productId)}
+                          currencySymbol={settings.currencySymbol}
+                          placeholder="Search name or SKU..."
+                        />
+                      </div>
+
+                      <div className="md:w-full">
+                        <input
+                          type="number"
+                          min="0"
+                          value={item.quantity}
+                          onChange={e => updateItemRow(idx, 'quantity', e.target.value)}
+                          placeholder="Qty"
+                          className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-2 text-white font-mono text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+
+                      <div className="md:w-full">
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={item.unitCost}
+                          onChange={e => updateItemRow(idx, 'unitCost', e.target.value)}
+                          placeholder="Cost"
+                          className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-2 text-white font-mono text-center focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        />
+                      </div>
+
+                      <div className="text-right font-mono font-bold text-white text-sm px-1">
+                        {formatCurrency(
+                          (parseFloat(item.quantity as string) || 0) *
+                            (parseFloat(item.unitCost as string) || 0),
+                          settings.currencySymbol
+                        )}
+                      </div>
+
+                      <div className="flex justify-end md:justify-center">
+                        {items.length > 1 ? (
+                          <button
+                            type="button"
+                            onClick={() => removeItemRow(idx)}
+                            className="text-slate-500 hover:text-rose-400 p-1.5 rounded hover:bg-slate-800 transition"
+                            title="Remove item"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        ) : (
+                          <div className="w-7" />
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Section: Payment & notes */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+                <h3 className="text-[11px] uppercase tracking-wider text-slate-400 font-bold mb-4">
+                  Payment & Notes
+                </h3>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1.5">Payment Status</label>
+                    <select
+                      value={paymentStatus}
+                      onChange={e => setPaymentStatus(e.target.value as any)}
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    >
+                      <option value="PAID">Paid in Full</option>
+                      <option value="PARTIAL">Partially Paid</option>
+                      <option value="UNPAID">Pending / On Credit</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-300 font-medium mb-1.5">Notes</label>
+                    <input
+                      type="text"
+                      value={notes}
+                      onChange={e => setNotes(e.target.value)}
+                      placeholder="e.g. Delivered by freight truck"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Sticky action footer */}
+              <div className="sticky bottom-0 -mx-6 px-6 py-4 bg-slate-900/95 backdrop-blur border-t border-slate-800 flex items-center justify-between gap-3">
+                <div className="text-xs">
+                  <div className="text-slate-400 text-[10px] uppercase tracking-wider font-semibold">
+                    Total Purchase Cost
+                  </div>
+                  <div className="text-xl font-extrabold font-mono text-white">
+                    {formatCurrency(calculatedTotal, settings.currencySymbol)}
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsModalOpen(false);
+                      setEditingPurchase(null);
+                      setIsEditMode(false);
+                    }}
+                    className="px-4 py-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow transition flex items-center gap-2"
+                  >
+                    <CheckCircle className="w-4 h-4" />
+                    <span>
+                      {editingPurchase ? 'Update Purchase & Recalculate Stock' : 'Record & Ingest Stock'}
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // LIST VIEW (purchases table) — unchanged
+  // ─────────────────────────────────────────────────────────────
   return (
     <div id="admin-purchases-view" className="flex-1 p-6 bg-slate-950 text-slate-100 overflow-y-auto">
       {/* Header */}
@@ -671,228 +1001,6 @@ export const AdminPurchases: React.FC = () => {
           </div>
         )}
       </div>
-
-      {/* Modal: New/Edit Purchase */}
-      {isModalOpen && canRecordPurchase && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4 overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-6 shadow-2xl animate-in fade-in zoom-in-95 my-auto">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800 mb-4">
-              <div className="flex items-center gap-2">
-                {isEditMode ? (
-                  <Pencil className="w-5 h-5 text-amber-400" />
-                ) : (
-                  <Truck className="w-5 h-5 text-blue-400" />
-                )}
-                <h3 className="text-base font-bold text-white">
-                  {editingPurchase ? 'Edit Purchase / Correct Quantity' : 'Record Stock In / Purchase'}
-                </h3>
-              </div>
-              <button
-                onClick={() => {
-                  setIsModalOpen(false);
-                  setEditingPurchase(null);
-                  setIsEditMode(false);
-                }}
-                className="text-slate-400 hover:text-white p-1"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {formError && (
-              <div className="mb-4 p-3 rounded-lg bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs">
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleSavePurchase} className="space-y-4 text-xs">
-              {!isEditMode && (
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">Target Shop / Unit *</label>
-                  <select
-                    value={purchaseShopId}
-                    onChange={e => setPurchaseShopId(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  >
-                    {availableShops.map(s => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} ({s.code || 'UNIT'})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">
-                    Supplier / Vendor Name (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={supplierName}
-                    onChange={e => setSupplierName(e.target.value)}
-                    placeholder="e.g. Apex Hardware Distro (or leave blank)"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">
-                    Vendor Invoice # (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={invoiceNumber}
-                    onChange={e => setInvoiceNumber(e.target.value)}
-                    placeholder="e.g. INV-98442"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white font-mono focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-
-              {/* Line Items */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-slate-300 font-semibold uppercase tracking-wider text-[11px]">
-                    {isEditMode ? 'Correct Item Quantities / Costs' : 'Received Inventory Items'}
-                  </label>
-                  <button
-                    type="button"
-                    onClick={addItemRow}
-                    className="flex items-center gap-1 text-blue-400 hover:text-blue-300 font-semibold"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add Item</span>
-                  </button>
-                </div>
-
-                {isEditMode && (
-                  <div className="mb-2 p-2 rounded bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[10px]">
-                    ⚠️ Warning: Changing quantities will recalculate stock. The system will reverse old
-                    quantities and apply new ones.
-                  </div>
-                )}
-
-                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                  {items.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="p-2.5 rounded-lg bg-slate-950 border border-slate-800 flex items-center gap-2"
-                    >
-                      <div className="flex-1 min-w-0">
-                        <ProductSearchSelect
-                          products={shopProducts.length > 0 ? shopProducts : dbState.products}
-                          value={item.productId}
-                          onChange={productId => updateItemRow(idx, 'productId', productId)}
-                          currencySymbol={settings.currencySymbol}
-                          placeholder="Search name or SKU..."
-                        />
-                      </div>
-
-                      <div className="w-20 shrink-0">
-                        <input
-                          type="number"
-                          min="0"
-                          value={item.quantity}
-                          onChange={e => updateItemRow(idx, 'quantity', e.target.value)}
-                          placeholder="Qty"
-                          className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono text-center"
-                        />
-                      </div>
-
-                      <div className="w-28 shrink-0">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          value={item.unitCost}
-                          onChange={e => updateItemRow(idx, 'unitCost', e.target.value)}
-                          placeholder="Cost"
-                          className="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1.5 text-white font-mono"
-                        />
-                      </div>
-
-                      <div className="w-24 text-right font-mono font-bold text-white text-xs shrink-0">
-                        {formatCurrency(
-                          (parseFloat(item.quantity as string) || 0) *
-                            (parseFloat(item.unitCost as string) || 0),
-                          settings.currencySymbol
-                        )}
-                      </div>
-
-                      {items.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={() => removeItemRow(idx)}
-                          className="text-slate-500 hover:text-rose-400 p-1 shrink-0"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 pt-2">
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">Payment Status</label>
-                  <select
-                    value={paymentStatus}
-                    onChange={e => setPaymentStatus(e.target.value as any)}
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  >
-                    <option value="PAID">Paid in Full</option>
-                    <option value="PARTIAL">Partially Paid</option>
-                    <option value="UNPAID">Pending / On Credit</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-300 font-medium mb-1">Notes</label>
-                  <input
-                    type="text"
-                    value={notes}
-                    onChange={e => setNotes(e.target.value)}
-                    placeholder="e.g. Delivered by freight truck"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:ring-1 focus:ring-blue-500"
-                  />
-                </div>
-              </div>
-
-              <div className="pt-3 border-t border-slate-800 flex items-center justify-between">
-                <div className="text-xs">
-                  <span className="text-slate-400">Total Purchase Cost: </span>
-                  <span className="text-base font-bold font-mono text-white">
-                    {formatCurrency(calculatedTotal, settings.currencySymbol)}
-                  </span>
-                </div>
-
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsModalOpen(false);
-                      setEditingPurchase(null);
-                      setIsEditMode(false);
-                    }}
-                    className="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold transition"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow transition"
-                  >
-                    {editingPurchase ? 'Update Purchase & Recalculate Stock' : 'Record & Ingest Stock'}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
